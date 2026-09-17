@@ -65,6 +65,18 @@ void main() {
       provider.setFilterMode(DateFilterMode.today);
       expect(provider.totalSpent, 200.0);
 
+      // Monthly distribution table is completely detached: standard expenses do not bleed into it
+      provider.setFilterMode(DateFilterMode.monthlyDistribution);
+      expect(provider.filterLabel, 'Monthly distribution');
+      expect(provider.totalSpent, 0.0);
+
+      // Adding to monthly distribution table does not bleed into Today or other tabs
+      await provider.addNewRow(description: 'Monthly rent', amount: 5000.0);
+      expect(provider.totalSpent, 5000.0);
+
+      provider.setFilterMode(DateFilterMode.today);
+      expect(provider.totalSpent, 200.0); // Remains 200.0, monthly rent not shown here
+
       provider.setFilterMode(DateFilterMode.customDate, customDate: DateTime(2020, 1, 1));
       expect(provider.totalSpent, 0.0);
     });

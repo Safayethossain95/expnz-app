@@ -3,10 +3,12 @@ import '../theme/app_theme.dart';
 
 class SyncStatusCard extends StatelessWidget {
   final DateTime lastSavedAt;
+  final bool isCloudSynced;
 
   const SyncStatusCard({
     super.key,
     required this.lastSavedAt,
+    this.isCloudSynced = false,
   });
 
   String _getTimeAgo() {
@@ -38,7 +40,7 @@ class SyncStatusCard extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // Green Checkmark Icon Badge
+          // Green Cloud / Checkmark Icon Badge
           Container(
             width: 38,
             height: 38,
@@ -46,10 +48,10 @@ class SyncStatusCard extends StatelessWidget {
               color: AppColors.mintBadgeBg,
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Icon(
-              Icons.check_rounded,
-              color: AppColors.mintCheck,
-              size: 22,
+            child: Icon(
+              isCloudSynced ? Icons.cloud_done_rounded : Icons.check_rounded,
+              color: AppColors.forestGreen,
+              size: 21,
             ),
           ),
 
@@ -60,17 +62,41 @@ class SyncStatusCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'All changes saved',
-                  style: TextStyle(
-                    color: AppColors.textDark,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                  ),
+                Row(
+                  children: [
+                    Text(
+                      isCloudSynced ? 'Synced to Cloud' : 'All changes saved',
+                      style: const TextStyle(
+                        color: AppColors.textDark,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (isCloudSynced) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE8F5E9),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: const Text(
+                          'Firestore',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.forestGreen,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  _getTimeAgo(),
+                  isCloudSynced
+                      ? '${_getTimeAgo()} • Safe across reinstallation'
+                      : _getTimeAgo(),
                   style: const TextStyle(
                     color: AppColors.textMuted,
                     fontSize: 12,

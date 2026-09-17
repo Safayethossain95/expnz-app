@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "481314825478",
+    "project_id": "expnz-123",
+    "storage_bucket": "expnz-123.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:481314825478:android:0ed25952b75987d15fea87",
+        "android_client_info": {
+          "package_name": "com.example.expnz"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "481314825478-tmqg2gj08nr6d9qg1031969ilabh32gv.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.expnz",
+            "certificate_hash": "eb2e2353a1d5460ae26da9b0234abde29a8047e3"
+          }
+        },
+        {
+          "client_id": "481314825478-22ns82bc3os3rkcsdlhau818eh85n3v3.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBKTj8Nmbn4Ty88Ww2aOsmXavnnaFXwInE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "481314825478-22ns82bc3os3rkcsdlhau818eh85n3v3.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

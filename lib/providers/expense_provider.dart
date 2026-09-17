@@ -7,6 +7,7 @@ enum DateFilterMode {
   allTime('All time'),
   today('Today'),
   thisMonth('This month'),
+  monthlyDistribution('Monthly distribution'),
   customDate('Specific date');
 
   final String label;
@@ -17,6 +18,7 @@ class ExpenseProvider extends ChangeNotifier {
   final ExpenseRepository _repository = ExpenseRepository();
 
   List<ExpenseItem> _expenses = [];
+  List<ExpenseItem> _monthlyDistributionExpenses = [];
   double _monthlyBudget = ExpenseRepository.defaultMonthlyBudget;
   DateFilterMode _filterMode = DateFilterMode.thisMonth;
   DateTime? _customSelectedDate;
@@ -26,6 +28,7 @@ class ExpenseProvider extends ChangeNotifier {
 
   // Initial visible rows count (5 rows visible initially)
   int _visibleLimit = 5;
+  int _monthlyDistVisibleLimit = 5;
 
   ExpenseProvider() {
     _init();
@@ -33,12 +36,14 @@ class ExpenseProvider extends ChangeNotifier {
 
   bool get isLoading => _isLoading;
   List<ExpenseItem> get allExpenses => _expenses;
+  List<ExpenseItem> get monthlyDistributionExpenses => _monthlyDistributionExpenses;
   double get monthlyBudget => _monthlyBudget;
   DateFilterMode get filterMode => _filterMode;
   DateTime? get customSelectedDate => _customSelectedDate;
   int get activeTabIndex => _activeTabIndex;
   DateTime get lastSavedAt => _lastSavedAt;
   int get visibleLimit => _visibleLimit;
+  bool get isMonthlyDistributionMode => _filterMode == DateFilterMode.monthlyDistribution;
 
   String get filterLabel {
     switch (_filterMode) {
@@ -48,6 +53,8 @@ class ExpenseProvider extends ChangeNotifier {
         return 'Today';
       case DateFilterMode.thisMonth:
         return DateFormat('MMMM yyyy').format(DateTime.now());
+      case DateFilterMode.monthlyDistribution:
+        return 'Monthly distribution';
       case DateFilterMode.customDate:
         if (_customSelectedDate != null) {
           return DateFormat('dd MMM yyyy').format(_customSelectedDate!);
@@ -56,11 +63,23 @@ class ExpenseProvider extends ChangeNotifier {
     }
   }
 
+  bool get isCloudSynced => _repository.userId != null && _repository.userId!.isNotEmpty;
+
+  Future<void> onUserChanged(String? uid) async {
+    _repository.setUserId(uid);
+    await _init();
+  }
+
+  Future<void> refreshFromCloud() async {
+    await _init();
+  }
+
   Future<void> _init() async {
     _isLoading = true;
     notifyListeners();
 
     _expenses = await _repository.loadExpenses();
+    _monthlyDistributionExpenses = await _repository.loadMonthlyDistributionExpenses();
     _monthlyBudget = await _repository.loadBudget();
     _isLoading = false;
     notifyListeners();
@@ -79,7 +98,7 @@ class ExpenseProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Check if an expense matches the current date filter
+  // Check if an expense matches the current date filter (only for standard expenses)
   bool _matchesDateFilter(ExpenseItem item) {
     if (item.date == null) return true;
     final now = DateTime.now();
@@ -93,6 +112,8 @@ class ExpenseProvider extends ChangeNotifier {
             item.date!.day == now.day;
       case DateFilterMode.thisMonth:
         return item.date!.year == now.year && item.date!.month == now.month;
+      case DateFilterMode.monthlyDistribution:
+        return true;
       case DateFilterMode.customDate:
         if (_customSelectedDate == null) return true;
         return item.date!.year == _customSelectedDate!.year &&
@@ -103,11 +124,29 @@ class ExpenseProvider extends ChangeNotifier {
 
   // Active recorded expenses (excluding empty placeholders) matching current filter
   List<ExpenseItem> get activeExpenses {
-    return _expenses.where((e) => !e.isPlaceholder && e.amount > 0 && _matchesDateFilter(e)).toList();
+    if (isMonthlyDistributionMode) {
+      return _monthlyDistributionExpenses
+          .where((e) => !e.isPlaceholder && e.amount > 0)
+          .toList();
+    }
+    return _expenses
+        .where((e) => !e.isPlaceholder && e.amount > 0 && _matchesDateFilter(e))
+        .toList();
   }
 
   // Rows displayed in the sheet table (initially 5 rows SL 1..5, expandable with +)
   List<ExpenseItem> get tableRows {
+    if (isMonthlyDistributionMode) {
+      while (_monthlyDistributionExpenses.length < _monthlyDistVisibleLimit) {
+        final blank = _repository.createNewBlankItem(isPlaceholder: true);
+        _monthlyDistributionExpenses.add(blank);
+      }
+      if (_monthlyDistributionExpenses.length > _monthlyDistVisibleLimit) {
+        return _monthlyDistributionExpenses.sublist(0, _monthlyDistVisibleLimit);
+      }
+      return _monthlyDistributionExpenses;
+    }
+
     final filtered = _expenses.where((e) {
       if (e.isPlaceholder) return true;
       return _matchesDateFilter(e);
@@ -160,7 +199,42 @@ class ExpenseProvider extends ChangeNotifier {
     String description = '',
     double amount = 0.0,
   }) async {
-    // Check if there is an untouched placeholder row in tableRows to activate
+    if (isMonthlyDistributionMode) {
+      final firstPlaceholderIndex = _monthlyDistributionExpenses.indexWhere((e) => e.isPlaceholder);
+      if (firstPlaceholderIndex != -1) {
+        _monthlyDistributionExpenses[firstPlaceholderIndex] = ExpenseItem(
+          id: _monthlyDistributionExpenses[firstPlaceholderIndex].id,
+          date: date ?? DateTime.now(),
+          category: category ?? ExpenseCategory.food,
+          description: description,
+          amount: amount,
+          isPlaceholder: false,
+          createdAt: DateTime.now(),
+        );
+        final newBlank = _repository.createNewBlankItem(isPlaceholder: true);
+        _monthlyDistributionExpenses.add(newBlank);
+        _monthlyDistVisibleLimit++;
+      } else {
+        final newItem = ExpenseItem(
+          id: _repository.createNewBlankItem().id,
+          date: date ?? DateTime.now(),
+          category: category ?? ExpenseCategory.food,
+          description: description,
+          amount: amount,
+          isPlaceholder: false,
+          createdAt: DateTime.now(),
+        );
+        _monthlyDistributionExpenses.add(newItem);
+        _monthlyDistVisibleLimit++;
+      }
+
+      _lastSavedAt = DateTime.now();
+      notifyListeners();
+      await _repository.saveMonthlyDistributionExpenses(_monthlyDistributionExpenses);
+      return;
+    }
+
+    // Standard table logic
     final firstPlaceholderIndex = _expenses.indexWhere((e) => e.isPlaceholder);
     if (firstPlaceholderIndex != -1) {
       _expenses[firstPlaceholderIndex] = ExpenseItem(
@@ -202,6 +276,36 @@ class ExpenseProvider extends ChangeNotifier {
     String? description,
     double? amount,
   }) async {
+    if (isMonthlyDistributionMode) {
+      final index = _monthlyDistributionExpenses.indexWhere((e) => e.id == id);
+      if (index == -1) return;
+
+      final current = _monthlyDistributionExpenses[index];
+      final wasPlaceholder = current.isPlaceholder;
+
+      final updated = current.copyWith(
+        date: date ?? current.date ?? DateTime.now(),
+        category: category ?? current.category,
+        description: description ?? current.description,
+        amount: amount ?? current.amount,
+        isPlaceholder: false,
+      );
+
+      _monthlyDistributionExpenses[index] = updated;
+
+      if (wasPlaceholder) {
+        final newPlaceholder = _repository.createNewBlankItem(isPlaceholder: true);
+        _monthlyDistributionExpenses.add(newPlaceholder);
+        _monthlyDistVisibleLimit++;
+      }
+
+      _lastSavedAt = DateTime.now();
+      notifyListeners();
+      await _repository.saveMonthlyDistributionExpenses(_monthlyDistributionExpenses);
+      return;
+    }
+
+    // Standard update
     final index = _expenses.indexWhere((e) => e.id == id);
     if (index == -1) return;
 
@@ -231,6 +335,17 @@ class ExpenseProvider extends ChangeNotifier {
   }
 
   Future<void> deleteRow(String id) async {
+    if (isMonthlyDistributionMode) {
+      _monthlyDistributionExpenses.removeWhere((e) => e.id == id);
+      if (_monthlyDistVisibleLimit > _monthlyDistributionExpenses.length) {
+        _monthlyDistVisibleLimit = _monthlyDistributionExpenses.length.clamp(5, 9999);
+      }
+      _lastSavedAt = DateTime.now();
+      notifyListeners();
+      await _repository.saveMonthlyDistributionExpenses(_monthlyDistributionExpenses);
+      return;
+    }
+
     _expenses.removeWhere((e) => e.id == id);
     if (_visibleLimit > _expenses.length) {
       _visibleLimit = _expenses.length.clamp(5, 9999);
@@ -248,6 +363,15 @@ class ExpenseProvider extends ChangeNotifier {
   }
 
   Future<void> resetToBlank() async {
+    if (isMonthlyDistributionMode) {
+      _monthlyDistributionExpenses = _repository.getInitialSeedData(prefix: 'monthly-dist');
+      _monthlyDistVisibleLimit = 5;
+      _lastSavedAt = DateTime.now();
+      notifyListeners();
+      await _repository.saveMonthlyDistributionExpenses(_monthlyDistributionExpenses);
+      return;
+    }
+
     _expenses = _repository.getInitialSeedData();
     _monthlyBudget = ExpenseRepository.defaultMonthlyBudget;
     _visibleLimit = 5;
