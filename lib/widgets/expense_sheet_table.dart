@@ -11,6 +11,55 @@ class ExpenseSheetTable extends StatelessWidget {
     required this.provider,
   });
 
+  void _showDbSaveToast(BuildContext context) {
+    ScaffoldMessenger.of(context).clearSnackBars();
+    final isCloud = provider.isCloudSynced;
+    final syncError = provider.lastSyncError;
+
+    String message;
+    Color bg;
+    IconData icon;
+
+    if (syncError != null) {
+      message = 'Saved locally • Cloud DB error: $syncError';
+      bg = const Color(0xFF991B1B);
+      icon = Icons.warning_amber_rounded;
+    } else if (isCloud) {
+      message = 'Saved to Cloud Database (Firestore)';
+      bg = AppColors.forestGreen;
+      icon = Icons.cloud_done_rounded;
+    } else {
+      message = 'Saved to Local DB (Sign in to sync with Cloud)';
+      bg = const Color(0xFF334155);
+      icon = Icons.save_rounded;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: Colors.white, size: 18),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                message,
+                style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 2,
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: bg,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(milliseconds: 1800),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final rows = provider.tableRows;
@@ -23,15 +72,13 @@ class ExpenseSheetTable extends StatelessWidget {
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.03),
-            blurRadius: 12,
+            blurRadius: 16,
             offset: const Offset(0, 4),
           ),
         ],
       ),
-      clipBehavior: Clip.antiAlias,
       child: LayoutBuilder(
         builder: (context, constraints) {
-          // Minimum width required so that all 4 columns can be clearly readable
           const double minTableWidth = 300.0;
           final double availableWidth = constraints.maxWidth;
           final bool isScrollable = availableWidth < minTableWidth;
@@ -40,7 +87,7 @@ class ExpenseSheetTable extends StatelessWidget {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Table Content with horizontal scroll safety
+              // Scrollable Sheet Content
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 physics: isScrollable
@@ -51,62 +98,73 @@ class ExpenseSheetTable extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      // Table Header Row: SL | CATEGORY | DESCRIPTION | AMOUNT
+                      // Header Row
                       Container(
-                        color: AppColors.tableHeaderBg,
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade50,
+                          borderRadius: const BorderRadius.vertical(
+                            top: Radius.circular(20),
+                          ),
+                          border: Border(
+                            bottom: BorderSide(
+                              color: AppColors.tableBorder,
+                              width: 1,
+                            ),
+                          ),
+                        ),
                         padding: const EdgeInsets.symmetric(
                           horizontal: 12,
-                          vertical: 12,
+                          vertical: 10,
                         ),
-                        child: const Row(
+                        child: Row(
                           children: [
                             SizedBox(
                               width: 24,
                               child: Text(
                                 'SL',
                                 style: TextStyle(
-                                  color: AppColors.headerColumnText,
                                   fontSize: 11,
-                                  fontWeight: FontWeight.w700,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.grey.shade700,
                                   letterSpacing: 0.5,
                                 ),
                               ),
                             ),
-                            SizedBox(width: 8),
+                            const SizedBox(width: 8),
                             SizedBox(
                               width: 74,
                               child: Text(
                                 'CATEGORY',
                                 style: TextStyle(
-                                  color: AppColors.headerColumnText,
                                   fontSize: 11,
-                                  fontWeight: FontWeight.w700,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.grey.shade700,
                                   letterSpacing: 0.5,
                                 ),
                               ),
                             ),
-                            SizedBox(width: 8),
+                            const SizedBox(width: 8),
                             Expanded(
                               child: Text(
                                 'DESCRIPTION',
                                 style: TextStyle(
-                                  color: AppColors.headerColumnText,
                                   fontSize: 11,
-                                  fontWeight: FontWeight.w700,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.grey.shade700,
                                   letterSpacing: 0.5,
                                 ),
                               ),
                             ),
-                            SizedBox(width: 8),
+                            const SizedBox(width: 8),
                             SizedBox(
                               width: 72,
                               child: Text(
                                 'AMOUNT',
                                 textAlign: TextAlign.right,
                                 style: TextStyle(
-                                  color: AppColors.headerColumnText,
                                   fontSize: 11,
-                                  fontWeight: FontWeight.w700,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.grey.shade700,
                                   letterSpacing: 0.5,
                                 ),
                               ),
@@ -141,16 +199,20 @@ class ExpenseSheetTable extends StatelessWidget {
                                   EditCellDialogs.showRowOptions(
                                     context: context,
                                     item: item,
-                                    onUpdate: (updated) {
-                                      provider.updateCell(
+                                    onUpdate: (updated) async {
+                                      await provider.updateCell(
                                         id: updated.id,
                                         date: updated.date,
                                         category: updated.category,
                                         description: updated.description,
                                         amount: updated.amount,
                                       );
+                                      if (context.mounted) _showDbSaveToast(context);
                                     },
-                                    onDelete: () => provider.deleteRow(item.id),
+                                    onDelete: () async {
+                                      await provider.deleteRow(item.id);
+                                      if (context.mounted) _showDbSaveToast(context);
+                                    },
                                   );
                                 }
                               },
@@ -191,7 +253,8 @@ class ExpenseSheetTable extends StatelessWidget {
                                             item.category,
                                           );
                                           if (selected != null) {
-                                            provider.updateCell(id: item.id, category: selected);
+                                            await provider.updateCell(id: item.id, category: selected);
+                                            if (context.mounted) _showDbSaveToast(context);
                                           }
                                         },
                                         child: item.category != null && !item.isPlaceholder
@@ -241,7 +304,8 @@ class ExpenseSheetTable extends StatelessWidget {
                                             item.description,
                                           );
                                           if (updatedDesc != null) {
-                                            provider.updateCell(id: item.id, description: updatedDesc);
+                                            await provider.updateCell(id: item.id, description: updatedDesc);
+                                            if (context.mounted) _showDbSaveToast(context);
                                           }
                                         },
                                         child: Padding(
@@ -275,7 +339,8 @@ class ExpenseSheetTable extends StatelessWidget {
                                             item.amount,
                                           );
                                           if (updatedAmt != null) {
-                                            provider.updateCell(id: item.id, amount: updatedAmt);
+                                            await provider.updateCell(id: item.id, amount: updatedAmt);
+                                            if (context.mounted) _showDbSaveToast(context);
                                           }
                                         },
                                         child: Padding(

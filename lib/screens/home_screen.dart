@@ -24,6 +24,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   late final ScrollController _scrollController;
+  bool _isSavingToDb = false;
 
   ExpenseProvider get provider => widget.provider;
 
@@ -280,54 +281,85 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 18),
 
               // Cloud Status Box
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(
-                  color: user != null ? const Color(0xFFF0FDF4) : const Color(0xFFFEF3C7),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: user != null ? const Color(0xFFBBF7D0) : const Color(0xFFFDE68A),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      user != null ? Icons.cloud_done_rounded : Icons.cloud_off_rounded,
-                      size: 18,
-                      color: user != null ? AppColors.forestGreen : const Color(0xFFD97706),
+              Builder(
+                builder: (context) {
+                  final syncError = provider.lastSyncError;
+                  final hasError = user != null && syncError != null;
+                  final isSynced = user != null && !hasError;
+
+                  Color boxBg = isSynced
+                      ? const Color(0xFFF0FDF4)
+                      : (hasError ? const Color(0xFFFEF2F2) : const Color(0xFFFEF3C7));
+                  Color borderColor = isSynced
+                      ? const Color(0xFFBBF7D0)
+                      : (hasError ? const Color(0xFFFECACA) : const Color(0xFFFDE68A));
+                  Color textColor = isSynced
+                      ? AppColors.forestGreen
+                      : (hasError ? const Color(0xFF991B1B) : const Color(0xFF92400E));
+                  IconData statusIcon = isSynced
+                      ? Icons.cloud_done_rounded
+                      : (hasError ? Icons.cloud_off_rounded : Icons.cloud_off_rounded);
+
+                  String message;
+                  if (user == null) {
+                    message = 'Guest mode: Not synced to cloud. Reinstalling will erase local data.';
+                  } else if (hasError) {
+                    message = 'Sync issue: $syncError\n(Check if Firestore is created & rules allow writes)';
+                  } else {
+                    message = 'Cloud Firestore Synced: Your data is backed up safely across uninstalls.';
+                  }
+
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: boxBg,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: borderColor),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        user != null
-                            ? 'Cloud Firestore Synced: Your data is backed up safely across uninstalls.'
-                            : 'Not synced to cloud. Reinstalling will erase local data.',
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w600,
-                          color: user != null ? AppColors.forestGreen : const Color(0xFF92400E),
-                          height: 1.3,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Icon(statusIcon, size: 18, color: textColor),
                         ),
-                      ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            message,
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                              color: textColor,
+                              height: 1.3,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  );
+                },
               ),
               const SizedBox(height: 18),
 
               if (user != null) ...[
-                // Refresh / Sync Now Button
+                // Push / Sync Now Button
                 SizedBox(
                   width: double.infinity,
                   child: OutlinedButton.icon(
                     onPressed: () async {
                       Navigator.pop(ctx);
-                      await provider.refreshFromCloud();
+                      final ok = await provider.pushToCloud();
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
-                            content: const Text('Data reloaded from Cloud Firestore!'),
-                            backgroundColor: AppColors.forestGreen,
+                            content: Text(
+                              ok
+                                  ? 'Data successfully saved to Cloud Firestore!'
+                                  : 'Sync failed: ${provider.lastSyncError ?? "Check Firestore permissions"}',
+                            ),
+                            backgroundColor: ok ? AppColors.forestGreen : const Color(0xFF991B1B),
+                            duration: Duration(seconds: ok ? 3 : 5),
                             behavior: SnackBarBehavior.floating,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           ),
@@ -749,7 +781,103 @@ class _HomeScreenState extends State<HomeScreen> {
                                 // Expense Sheet Table (Columns: SL, CATEGORY, DESCRIPTION, AMOUNT)
                                 ExpenseSheetTable(provider: provider),
 
-                                const SizedBox(height: 16),
+                                const SizedBox(height: 14),
+
+                                // Save to DB Action Button
+                                SizedBox(
+                                  width: double.infinity,
+                                  height: 48,
+                                  child: ElevatedButton.icon(
+                                    onPressed: _isSavingToDb
+                                        ? null
+                                        : () async {
+                                            setState(() => _isSavingToDb = true);
+                                            final ok = await provider.pushToCloud();
+                                            if (mounted) {
+                                              setState(() => _isSavingToDb = false);
+                                              final isCloud = provider.isCloudSynced;
+                                              final syncError = provider.lastSyncError;
+
+                                              String msg;
+                                              Color bg;
+                                              IconData icon;
+
+                                              if (!isCloud) {
+                                                msg = 'Saved to Local DB (Sign in with Google to sync with Cloud)';
+                                                bg = const Color(0xFF334155);
+                                                icon = Icons.save_rounded;
+                                              } else if (ok) {
+                                                msg = 'Successfully saved to Cloud Database (Firestore)!';
+                                                bg = AppColors.forestGreen;
+                                                icon = Icons.cloud_done_rounded;
+                                              } else {
+                                                msg = 'Save failed: ${syncError ?? "Check Firestore permissions/database"}';
+                                                bg = const Color(0xFF991B1B);
+                                                icon = Icons.error_outline_rounded;
+                                              }
+
+                                              ScaffoldMessenger.of(context).clearSnackBars();
+                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                SnackBar(
+                                                  content: Row(
+                                                    children: [
+                                                      Icon(icon, color: Colors.white, size: 18),
+                                                      const SizedBox(width: 8),
+                                                      Expanded(
+                                                        child: Text(
+                                                          msg,
+                                                          style: const TextStyle(
+                                                            fontWeight: FontWeight.w600,
+                                                            fontSize: 13,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                  backgroundColor: bg,
+                                                  duration: Duration(seconds: ok ? 3 : 5),
+                                                  behavior: SnackBarBehavior.floating,
+                                                  shape: RoundedRectangleBorder(
+                                                    borderRadius: BorderRadius.circular(10),
+                                                  ),
+                                                ),
+                                              );
+                                            }
+                                          },
+                                    icon: _isSavingToDb
+                                        ? const SizedBox(
+                                            width: 18,
+                                            height: 18,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: Colors.white,
+                                            ),
+                                          )
+                                        : const Icon(
+                                            Icons.cloud_upload_rounded,
+                                            color: Colors.white,
+                                            size: 20,
+                                          ),
+                                    label: Text(
+                                      _isSavingToDb ? 'Saving to Database...' : 'Save to DB',
+                                      style: const TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w700,
+                                        color: Colors.white,
+                                        letterSpacing: 0.3,
+                                      ),
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: AppColors.forestGreen,
+                                      elevation: 1,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(14),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+
+                                const SizedBox(height: 14),
 
                                 // All changes saved banner
                                 SyncStatusCard(

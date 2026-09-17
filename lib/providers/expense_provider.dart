@@ -64,6 +64,7 @@ class ExpenseProvider extends ChangeNotifier {
   }
 
   bool get isCloudSynced => _repository.userId != null && _repository.userId!.isNotEmpty;
+  String? get lastSyncError => _repository.lastSyncError;
 
   Future<void> onUserChanged(String? uid) async {
     _repository.setUserId(uid);
@@ -72,6 +73,15 @@ class ExpenseProvider extends ChangeNotifier {
 
   Future<void> refreshFromCloud() async {
     await _init();
+  }
+
+  Future<bool> pushToCloud() async {
+    if (_repository.userId == null || _repository.userId!.isEmpty) return false;
+    await _repository.saveExpenses(_expenses);
+    await _repository.saveMonthlyDistributionExpenses(_monthlyDistributionExpenses);
+    await _repository.saveBudget(_monthlyBudget);
+    notifyListeners();
+    return _repository.lastSyncError == null;
   }
 
   Future<void> _init() async {

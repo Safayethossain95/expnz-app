@@ -15,9 +15,11 @@ class ExpenseRepository {
   FirebaseFirestore get _firestore => FirebaseFirestore.instance;
 
   String? _userId;
+  String? lastSyncError;
 
   void setUserId(String? uid) {
     _userId = uid;
+    lastSyncError = null;
   }
 
   String? get userId => _userId;
@@ -116,7 +118,9 @@ class ExpenseRepository {
               'items': items.map((e) => e.toMap()).toList(),
               'updatedAt': FieldValue.serverTimestamp(),
             }, SetOptions(merge: true));
+        lastSyncError = null;
       } catch (e) {
+        lastSyncError = e.toString();
         debugPrint('Firestore saveExpenses error: $e');
       }
     }
@@ -191,7 +195,9 @@ class ExpenseRepository {
               'items': items.map((e) => e.toMap()).toList(),
               'updatedAt': FieldValue.serverTimestamp(),
             }, SetOptions(merge: true));
+        lastSyncError = null;
       } catch (e) {
+        lastSyncError = e.toString();
         debugPrint('Firestore saveMonthlyDistributionExpenses error: $e');
       }
     }
@@ -243,7 +249,9 @@ class ExpenseRepository {
               'amount': budget,
               'updatedAt': FieldValue.serverTimestamp(),
             }, SetOptions(merge: true));
+        lastSyncError = null;
       } catch (e) {
+        lastSyncError = e.toString();
         debugPrint('Firestore saveBudget error: $e');
       }
     }
