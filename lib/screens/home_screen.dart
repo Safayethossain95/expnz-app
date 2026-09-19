@@ -793,7 +793,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                         : () async {
                                             setState(() => _isSavingToDb = true);
                                             final ok = await provider.pushToCloud();
-                                            if (mounted) {
+                                            if (context.mounted) {
                                               setState(() => _isSavingToDb = false);
                                               final isCloud = provider.isCloudSynced;
                                               final syncError = provider.lastSyncError;

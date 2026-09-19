@@ -247,16 +247,20 @@ class ExpenseSheetTable extends StatelessWidget {
                                       width: 74,
                                       child: InkWell(
                                         borderRadius: BorderRadius.circular(8),
-                                        onTap: () async {
-                                          final selected = await EditCellDialogs.pickCategory(
-                                            context,
-                                            item.category,
-                                          );
-                                          if (selected != null) {
-                                            await provider.updateCell(id: item.id, category: selected);
-                                            if (context.mounted) _showDbSaveToast(context);
-                                          }
-                                        },
+                                         onTap: () async {
+                                           final result = await EditCellDialogs.pickCategory(
+                                             context,
+                                             item.category,
+                                           );
+                                           if (result != null) {
+                                             if (result.isCleared) {
+                                               await provider.updateCell(id: item.id, clearCategory: true);
+                                             } else {
+                                               await provider.updateCell(id: item.id, category: result.category);
+                                             }
+                                             if (context.mounted) _showDbSaveToast(context);
+                                           }
+                                         },
                                         child: item.category != null && !item.isPlaceholder
                                             ? Container(
                                                 padding: const EdgeInsets.symmetric(

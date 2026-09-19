@@ -26,10 +26,6 @@ class ExpenseProvider extends ChangeNotifier {
   DateTime _lastSavedAt = DateTime.now();
   bool _isLoading = true;
 
-  // Initial visible rows count (5 rows visible initially)
-  int _visibleLimit = 5;
-  int _monthlyDistVisibleLimit = 5;
-
   ExpenseProvider() {
     _init();
   }
@@ -42,8 +38,15 @@ class ExpenseProvider extends ChangeNotifier {
   DateTime? get customSelectedDate => _customSelectedDate;
   int get activeTabIndex => _activeTabIndex;
   DateTime get lastSavedAt => _lastSavedAt;
-  int get visibleLimit => _visibleLimit;
+  int get visibleLimit => tableRows.length;
   bool get isMonthlyDistributionMode => _filterMode == DateFilterMode.monthlyDistribution;
+
+  DateTime get currentEffectiveDate {
+    if (_filterMode == DateFilterMode.customDate && _customSelectedDate != null) {
+      return _customSelectedDate!;
+    }
+    return DateTime.now();
+  }
 
   String get filterLabel {
     switch (_filterMode) {
@@ -110,7 +113,9 @@ class ExpenseProvider extends ChangeNotifier {
 
   // Check if an expense matches the current date filter (only for standard expenses)
   bool _matchesDateFilter(ExpenseItem item) {
-    if (item.date == null) return true;
+    if (item.date == null) {
+      return _filterMode == DateFilterMode.allTime || _filterMode == DateFilterMode.monthlyDistribution;
+    }
     final now = DateTime.now();
 
     switch (_filterMode) {
@@ -144,15 +149,12 @@ class ExpenseProvider extends ChangeNotifier {
         .toList();
   }
 
-  // Rows displayed in the sheet table (initially 5 rows SL 1..5, expandable with +)
+  // Rows displayed in the sheet table (minimum 5 rows, all rows visible even if > 5)
   List<ExpenseItem> get tableRows {
     if (isMonthlyDistributionMode) {
-      while (_monthlyDistributionExpenses.length < _monthlyDistVisibleLimit) {
+      while (_monthlyDistributionExpenses.length < 5) {
         final blank = _repository.createNewBlankItem(isPlaceholder: true);
         _monthlyDistributionExpenses.add(blank);
-      }
-      if (_monthlyDistributionExpenses.length > _monthlyDistVisibleLimit) {
-        return _monthlyDistributionExpenses.sublist(0, _monthlyDistVisibleLimit);
       }
       return _monthlyDistributionExpenses;
     }
@@ -162,16 +164,16 @@ class ExpenseProvider extends ChangeNotifier {
       return _matchesDateFilter(e);
     }).toList();
 
-    // Ensure we show at least _visibleLimit rows
-    while (filtered.length < _visibleLimit) {
-      final blank = _repository.createNewBlankItem(isPlaceholder: true);
+    // Ensure we show at least 5 rows
+    while (filtered.length < 5) {
+      final blank = _repository.createNewBlankItem(
+        isPlaceholder: true,
+        date: currentEffectiveDate,
+      );
       _expenses.add(blank);
       filtered.add(blank);
     }
 
-    if (filtered.length > _visibleLimit) {
-      return filtered.sublist(0, _visibleLimit);
-    }
     return filtered;
   }
 
@@ -209,12 +211,14 @@ class ExpenseProvider extends ChangeNotifier {
     String description = '',
     double amount = 0.0,
   }) async {
+    final effectiveDate = date ?? currentEffectiveDate;
+
     if (isMonthlyDistributionMode) {
       final firstPlaceholderIndex = _monthlyDistributionExpenses.indexWhere((e) => e.isPlaceholder);
       if (firstPlaceholderIndex != -1) {
         _monthlyDistributionExpenses[firstPlaceholderIndex] = ExpenseItem(
           id: _monthlyDistributionExpenses[firstPlaceholderIndex].id,
-          date: date ?? DateTime.now(),
+          date: effectiveDate,
           category: category ?? ExpenseCategory.food,
           description: description,
           amount: amount,
@@ -223,11 +227,10 @@ class ExpenseProvider extends ChangeNotifier {
         );
         final newBlank = _repository.createNewBlankItem(isPlaceholder: true);
         _monthlyDistributionExpenses.add(newBlank);
-        _monthlyDistVisibleLimit++;
       } else {
         final newItem = ExpenseItem(
           id: _repository.createNewBlankItem().id,
-          date: date ?? DateTime.now(),
+          date: effectiveDate,
           category: category ?? ExpenseCategory.food,
           description: description,
           amount: amount,
@@ -235,7 +238,8 @@ class ExpenseProvider extends ChangeNotifier {
           createdAt: DateTime.now(),
         );
         _monthlyDistributionExpenses.add(newItem);
-        _monthlyDistVisibleLimit++;
+        final newBlank = _repository.createNewBlankItem(isPlaceholder: true);
+        _monthlyDistributionExpenses.add(newBlank);
       }
 
       _lastSavedAt = DateTime.now();
@@ -249,7 +253,7 @@ class ExpenseProvider extends ChangeNotifier {
     if (firstPlaceholderIndex != -1) {
       _expenses[firstPlaceholderIndex] = ExpenseItem(
         id: _expenses[firstPlaceholderIndex].id,
-        date: date ?? DateTime.now(),
+        date: effectiveDate,
         category: category ?? ExpenseCategory.food,
         description: description,
         amount: amount,
@@ -257,13 +261,15 @@ class ExpenseProvider extends ChangeNotifier {
         createdAt: DateTime.now(),
       );
       // Append a new blank row at the end so it keeps expanding
-      final newBlank = _repository.createNewBlankItem(isPlaceholder: true);
+      final newBlank = _repository.createNewBlankItem(
+        isPlaceholder: true,
+        date: effectiveDate,
+      );
       _expenses.add(newBlank);
-      _visibleLimit++;
     } else {
       final newItem = ExpenseItem(
         id: _repository.createNewBlankItem().id,
-        date: date ?? DateTime.now(),
+        date: effectiveDate,
         category: category ?? ExpenseCategory.food,
         description: description,
         amount: amount,
@@ -271,7 +277,11 @@ class ExpenseProvider extends ChangeNotifier {
         createdAt: DateTime.now(),
       );
       _expenses.add(newItem);
-      _visibleLimit++;
+      final newBlank = _repository.createNewBlankItem(
+        isPlaceholder: true,
+        date: effectiveDate,
+      );
+      _expenses.add(newBlank);
     }
 
     _lastSavedAt = DateTime.now();
@@ -283,6 +293,7 @@ class ExpenseProvider extends ChangeNotifier {
     required String id,
     DateTime? date,
     ExpenseCategory? category,
+    bool clearCategory = false,
     String? description,
     double? amount,
   }) async {
@@ -295,7 +306,8 @@ class ExpenseProvider extends ChangeNotifier {
 
       final updated = current.copyWith(
         date: date ?? current.date ?? DateTime.now(),
-        category: category ?? current.category,
+        category: category,
+        clearCategory: clearCategory,
         description: description ?? current.description,
         amount: amount ?? current.amount,
         isPlaceholder: false,
@@ -306,7 +318,6 @@ class ExpenseProvider extends ChangeNotifier {
       if (wasPlaceholder) {
         final newPlaceholder = _repository.createNewBlankItem(isPlaceholder: true);
         _monthlyDistributionExpenses.add(newPlaceholder);
-        _monthlyDistVisibleLimit++;
       }
 
       _lastSavedAt = DateTime.now();
@@ -322,9 +333,19 @@ class ExpenseProvider extends ChangeNotifier {
     final current = _expenses[index];
     final wasPlaceholder = current.isPlaceholder;
 
+    final DateTime targetDate;
+    if (date != null) {
+      targetDate = date;
+    } else if (wasPlaceholder) {
+      targetDate = currentEffectiveDate;
+    } else {
+      targetDate = current.date ?? currentEffectiveDate;
+    }
+
     final updated = current.copyWith(
-      date: date ?? current.date ?? DateTime.now(),
-      category: category ?? current.category,
+      date: targetDate,
+      category: category,
+      clearCategory: clearCategory,
       description: description ?? current.description,
       amount: amount ?? current.amount,
       isPlaceholder: false,
@@ -334,9 +355,11 @@ class ExpenseProvider extends ChangeNotifier {
 
     // If a placeholder was filled, add another placeholder at bottom to keep rows available
     if (wasPlaceholder) {
-      final newPlaceholder = _repository.createNewBlankItem(isPlaceholder: true);
+      final newPlaceholder = _repository.createNewBlankItem(
+        isPlaceholder: true,
+        date: currentEffectiveDate,
+      );
       _expenses.add(newPlaceholder);
-      _visibleLimit++;
     }
 
     _lastSavedAt = DateTime.now();
@@ -347,9 +370,6 @@ class ExpenseProvider extends ChangeNotifier {
   Future<void> deleteRow(String id) async {
     if (isMonthlyDistributionMode) {
       _monthlyDistributionExpenses.removeWhere((e) => e.id == id);
-      if (_monthlyDistVisibleLimit > _monthlyDistributionExpenses.length) {
-        _monthlyDistVisibleLimit = _monthlyDistributionExpenses.length.clamp(5, 9999);
-      }
       _lastSavedAt = DateTime.now();
       notifyListeners();
       await _repository.saveMonthlyDistributionExpenses(_monthlyDistributionExpenses);
@@ -357,9 +377,6 @@ class ExpenseProvider extends ChangeNotifier {
     }
 
     _expenses.removeWhere((e) => e.id == id);
-    if (_visibleLimit > _expenses.length) {
-      _visibleLimit = _expenses.length.clamp(5, 9999);
-    }
     _lastSavedAt = DateTime.now();
     notifyListeners();
     await _repository.saveExpenses(_expenses);
@@ -375,7 +392,6 @@ class ExpenseProvider extends ChangeNotifier {
   Future<void> resetToBlank() async {
     if (isMonthlyDistributionMode) {
       _monthlyDistributionExpenses = _repository.getInitialSeedData(prefix: 'monthly-dist');
-      _monthlyDistVisibleLimit = 5;
       _lastSavedAt = DateTime.now();
       notifyListeners();
       await _repository.saveMonthlyDistributionExpenses(_monthlyDistributionExpenses);
@@ -384,7 +400,6 @@ class ExpenseProvider extends ChangeNotifier {
 
     _expenses = _repository.getInitialSeedData();
     _monthlyBudget = ExpenseRepository.defaultMonthlyBudget;
-    _visibleLimit = 5;
     _filterMode = DateFilterMode.thisMonth;
     _lastSavedAt = DateTime.now();
     notifyListeners();

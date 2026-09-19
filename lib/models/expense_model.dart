@@ -49,6 +49,7 @@ class ExpenseItem {
     String? id,
     DateTime? date,
     ExpenseCategory? category,
+    bool clearCategory = false,
     String? description,
     double? amount,
     bool? isPlaceholder,
@@ -57,7 +58,7 @@ class ExpenseItem {
     return ExpenseItem(
       id: id ?? this.id,
       date: date ?? this.date,
-      category: category ?? this.category,
+      category: clearCategory ? null : (category ?? this.category),
       description: description ?? this.description,
       amount: amount ?? this.amount,
       isPlaceholder: isPlaceholder ?? this.isPlaceholder,

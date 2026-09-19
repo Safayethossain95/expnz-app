@@ -257,10 +257,10 @@ class ExpenseRepository {
     }
   }
 
-  ExpenseItem createNewBlankItem({bool isPlaceholder = false}) {
+  ExpenseItem createNewBlankItem({bool isPlaceholder = false, DateTime? date}) {
     return ExpenseItem(
       id: _uuid.v4(),
-      date: DateTime.now(),
+      date: date ?? DateTime.now(),
       category: null,
       description: '',
       amount: 0.0,

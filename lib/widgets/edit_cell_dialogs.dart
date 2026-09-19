@@ -3,14 +3,27 @@ import 'package:intl/intl.dart';
 import '../models/expense_model.dart';
 import '../theme/app_theme.dart';
 
+class CategoryPickResult {
+  final ExpenseCategory? category;
+  final bool isCleared;
+
+  const CategoryPickResult.selected(ExpenseCategory cat)
+      : category = cat,
+        isCleared = false;
+
+  const CategoryPickResult.cleared()
+      : category = null,
+        isCleared = true;
+}
+
 class EditCellDialogs {
   // 1. Pick Date
   static Future<DateTime?> pickDate(BuildContext context, DateTime? initialDate) async {
     final picked = await showDatePicker(
       context: context,
       initialDate: initialDate ?? DateTime.now(),
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2030),
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2050),
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
@@ -28,14 +41,16 @@ class EditCellDialogs {
   }
 
   // 2. Pick Category Popup
-  static Future<ExpenseCategory?> pickCategory(BuildContext context, ExpenseCategory? current) async {
-    return showModalBottomSheet<ExpenseCategory>(
+  static Future<CategoryPickResult?> pickCategory(BuildContext context, ExpenseCategory? current) async {
+    return showModalBottomSheet<CategoryPickResult>(
       context: context,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) {
+        final isNoneSelected = current == null;
+
         return SafeArea(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
@@ -71,29 +86,61 @@ class EditCellDialogs {
                 Wrap(
                   spacing: 10,
                   runSpacing: 10,
-                  children: ExpenseCategory.values.map((cat) {
-                    final isSelected = cat == current;
-                    return InkWell(
+                  children: [
+                    ...ExpenseCategory.values.map((cat) {
+                      final isSelected = cat == current;
+                      return InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: () => Navigator.pop(ctx, CategoryPickResult.selected(cat)),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                          decoration: BoxDecoration(
+                            color: cat.bgColor,
+                            borderRadius: BorderRadius.circular(12),
+                            border: isSelected
+                                ? Border.all(color: cat.textColor, width: 2)
+                                : Border.all(color: Colors.transparent),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(cat.icon, size: 16, color: cat.textColor),
+                              const SizedBox(width: 6),
+                              Text(
+                                cat.label,
+                                style: TextStyle(
+                                  color: cat.textColor,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
+                    // Blank option to clear category
+                    InkWell(
                       borderRadius: BorderRadius.circular(12),
-                      onTap: () => Navigator.pop(ctx, cat),
+                      onTap: () => Navigator.pop(ctx, const CategoryPickResult.cleared()),
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
                         decoration: BoxDecoration(
-                          color: cat.bgColor,
+                          color: const Color(0xFFF3F4F6),
                           borderRadius: BorderRadius.circular(12),
-                          border: isSelected
-                              ? Border.all(color: cat.textColor, width: 2)
+                          border: isNoneSelected
+                              ? Border.all(color: AppColors.textMuted, width: 2)
                               : Border.all(color: Colors.transparent),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(cat.icon, size: 16, color: cat.textColor),
-                            const SizedBox(width: 6),
+                          children: const [
+                            Icon(Icons.remove_circle_outline_rounded, size: 16, color: AppColors.textMuted),
+                            SizedBox(width: 6),
                             Text(
-                              cat.label,
+                              'Blank (None)',
                               style: TextStyle(
-                                color: cat.textColor,
+                                color: AppColors.textDark,
                                 fontWeight: FontWeight.w700,
                                 fontSize: 13,
                               ),
@@ -101,8 +148,8 @@ class EditCellDialogs {
                           ],
                         ),
                       ),
-                    );
-                  }).toList(),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 16),
               ],
@@ -330,9 +377,13 @@ class EditCellDialogs {
                   ),
                   onTap: () async {
                     Navigator.pop(ctx);
-                    final newCat = await pickCategory(context, item.category);
-                    if (newCat != null) {
-                      onUpdate(item.copyWith(category: newCat, isPlaceholder: false));
+                    final result = await pickCategory(context, item.category);
+                    if (result != null) {
+                      if (result.isCleared) {
+                        onUpdate(item.copyWith(clearCategory: true, isPlaceholder: false));
+                      } else {
+                        onUpdate(item.copyWith(category: result.category, isPlaceholder: false));
+                      }
                     }
                   },
                 ),
