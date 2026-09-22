@@ -9,6 +9,9 @@ import '../widgets/expense_sheet_table.dart';
 import '../widgets/sync_status_card.dart';
 import '../widgets/insights_view.dart';
 import '../widgets/edit_cell_dialogs.dart';
+import '../services/pin_lock_service.dart';
+import '../widgets/set_pin_dialog.dart';
+import 'calculator_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final ExpenseProvider provider;
@@ -187,18 +190,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 ListTile(
                   contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.all_inclusive_rounded, color: AppColors.forestGreen),
-                  title: const Text('All Time'),
-                  trailing: provider.filterMode == DateFilterMode.allTime
-                      ? const Icon(Icons.check_rounded, color: AppColors.forestGreen)
-                      : null,
-                  onTap: () {
-                    provider.setFilterMode(DateFilterMode.allTime);
-                    Navigator.pop(ctx);
-                  },
-                ),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
                   leading: const Icon(Icons.event_note_rounded, color: AppColors.forestGreen),
                   title: const Text('Pick Specific Date...'),
                   trailing: provider.filterMode == DateFilterMode.customDate
@@ -218,129 +209,318 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       },
     );
-  }
-
-  void _showAccountDialog(BuildContext context) {
+  }  void _showAccountDialog(BuildContext context) {
     final authService = AuthService();
     final user = authService.currentUser;
+    final pinService = PinLockService();
 
     showDialog(
       context: context,
       builder: (ctx) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          contentPadding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Avatar
-              Container(
-                width: 64,
-                height: 64,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: AppColors.mintBadgeBg,
-                  border: Border.all(color: AppColors.forestGreen, width: 2),
-                ),
-                child: ClipOval(
-                  child: user?.photoURL != null
-                      ? Image.network(
-                          user!.photoURL!,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, _, _) => const Icon(
-                            Icons.person_rounded,
-                            color: AppColors.forestGreen,
-                            size: 36,
-                          ),
-                        )
-                      : const Icon(
-                          Icons.person_rounded,
-                          color: AppColors.forestGreen,
-                          size: 36,
-                        ),
-                ),
-              ),
-              const SizedBox(height: 14),
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            return FutureBuilder<bool>(
+              future: pinService.isPinEnabled(),
+              builder: (context, pinSnapshot) {
+                final isPinSet = pinSnapshot.data ?? false;
 
-              Text(
-                user?.displayName ?? (user != null ? 'Signed In' : 'Guest Mode'),
-                style: const TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textDark,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                user?.email ?? 'Using offline local storage only',
-                style: const TextStyle(
-                  fontSize: 13,
-                  color: AppColors.textMuted,
-                ),
-              ),
-              const SizedBox(height: 18),
-
-              // Cloud Status Box
-              Builder(
-                builder: (context) {
-                  final syncError = provider.lastSyncError;
-                  final hasError = user != null && syncError != null;
-                  final isSynced = user != null && !hasError;
-
-                  Color boxBg = isSynced
-                      ? const Color(0xFFF0FDF4)
-                      : (hasError ? const Color(0xFFFEF2F2) : const Color(0xFFFEF3C7));
-                  Color borderColor = isSynced
-                      ? const Color(0xFFBBF7D0)
-                      : (hasError ? const Color(0xFFFECACA) : const Color(0xFFFDE68A));
-                  Color textColor = isSynced
-                      ? AppColors.forestGreen
-                      : (hasError ? const Color(0xFF991B1B) : const Color(0xFF92400E));
-                  IconData statusIcon = isSynced
-                      ? Icons.cloud_done_rounded
-                      : (hasError ? Icons.cloud_off_rounded : Icons.cloud_off_rounded);
-
-                  String message;
-                  if (user == null) {
-                    message = 'Guest mode: Not synced to cloud. Reinstalling will erase local data.';
-                  } else if (hasError) {
-                    message = 'Sync issue: $syncError\n(Check if Firestore is created & rules allow writes)';
-                  } else {
-                    message = 'Cloud Firestore Synced: Your data is backed up safely across uninstalls.';
-                  }
-
-                  return Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: boxBg,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: borderColor),
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                return AlertDialog(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  contentPadding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
+                  content: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Padding(
-                          padding: const EdgeInsets.only(top: 2),
-                          child: Icon(statusIcon, size: 18, color: textColor),
+                        // Avatar
+                        Container(
+                          width: 64,
+                          height: 64,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: AppColors.mintBadgeBg,
+                            border: Border.all(color: AppColors.forestGreen, width: 2),
+                          ),
+                          child: ClipOval(
+                            child: user?.photoURL != null
+                                ? Image.network(
+                                    user!.photoURL!,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, _, _) => const Icon(
+                                      Icons.person_rounded,
+                                      color: AppColors.forestGreen,
+                                      size: 36,
+                                    ),
+                                  )
+                                : const Icon(
+                                    Icons.person_rounded,
+                                    color: AppColors.forestGreen,
+                                    size: 36,
+                                  ),
+                          ),
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            message,
-                            style: TextStyle(
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w600,
-                              color: textColor,
-                              height: 1.3,
+                        const SizedBox(height: 14),
+
+                        Text(
+                          user?.displayName ?? (user != null ? 'Signed In' : 'Guest Mode'),
+                          style: const TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.textDark,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          user?.email ?? 'Using offline local storage only',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: AppColors.textMuted,
+                          ),
+                        ),
+                        const SizedBox(height: 18),
+
+                        // Cloud Status Box
+                        Builder(
+                          builder: (context) {
+                            final syncError = provider.lastSyncError;
+                            final hasError = user != null && syncError != null;
+                            final isSynced = user != null && !hasError;
+
+                            Color boxBg = isSynced
+                                ? const Color(0xFFF0FDF4)
+                                : (hasError ? const Color(0xFFFEF2F2) : const Color(0xFFFEF3C7));
+                            Color borderColor = isSynced
+                                ? const Color(0xFFBBF7D0)
+                                : (hasError ? const Color(0xFFFECACA) : const Color(0xFFFDE68A));
+                            Color textColor = isSynced
+                                ? AppColors.forestGreen
+                                : (hasError ? const Color(0xFF991B1B) : const Color(0xFF92400E));
+                            IconData statusIcon = isSynced
+                                ? Icons.cloud_done_rounded
+                                : (hasError ? Icons.cloud_off_rounded : Icons.cloud_off_rounded);
+
+                            String message;
+                            if (user == null) {
+                              message = 'Guest mode: Not synced to cloud. Reinstalling will erase local data.';
+                            } else if (hasError) {
+                              message = 'Sync issue: $syncError\n(Check if Firestore is created & rules allow writes)';
+                            } else {
+                              message = 'Cloud Firestore Synced: Your data is backed up safely across uninstalls.';
+                            }
+
+                            return Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                              decoration: BoxDecoration(
+                                color: boxBg,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: borderColor),
+                              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 2),
+                                    child: Icon(statusIcon, size: 18, color: textColor),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      message,
+                                      style: TextStyle(
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.w600,
+                                        color: textColor,
+                                        height: 1.3,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 14),
+
+                        // App PIN Lock Section
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: isPinSet ? const Color(0xFFF0FDF4) : const Color(0xFFF9FAFB),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: isPinSet ? const Color(0xFFBBF7D0) : const Color(0xFFE5E7EB),
                             ),
                           ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    isPinSet ? Icons.lock_outline_rounded : Icons.lock_open_rounded,
+                                    size: 18,
+                                    color: isPinSet ? AppColors.forestGreen : AppColors.textMuted,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  const Expanded(
+                                    child: Text(
+                                      'App PIN Lock',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                        color: AppColors.textDark,
+                                      ),
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: isPinSet ? const Color(0xFFDCFCE7) : const Color(0xFFF3F4F6),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Text(
+                                      isPinSet ? 'Active' : 'Off',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                        color: isPinSet ? AppColors.forestGreen : AppColors.textMuted,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                isPinSet
+                                    ? 'App is protected with a 4-digit PIN lock.'
+                                    : 'Set a 4-digit PIN to lock access to your expense tracker.',
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  color: AppColors.textMuted,
+                                  height: 1.3,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              if (!isPinSet)
+                                SizedBox(
+                                  width: double.infinity,
+                                  height: 38,
+                                  child: ElevatedButton.icon(
+                                    onPressed: () async {
+                                      final success = await SetPinDialog.show(
+                                        context,
+                                        isChangingExisting: false,
+                                        userEmail: user?.email,
+                                      );
+                                      if (success == true) {
+                                        setDialogState(() {});
+                                      }
+                                    },
+                                    icon: const Icon(Icons.pin_rounded, size: 16),
+                                    label: const Text('Set 4-Digit PIN', style: TextStyle(fontSize: 12.5)),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: AppColors.forestGreen,
+                                      foregroundColor: Colors.white,
+                                      elevation: 0,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                    ),
+                                  ),
+                                )
+                              else
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: SizedBox(
+                                        height: 36,
+                                        child: OutlinedButton(
+                                          onPressed: () async {
+                                            final success = await SetPinDialog.show(
+                                              context,
+                                              isChangingExisting: true,
+                                              userEmail: user?.email,
+                                            );
+                                            if (success == true) {
+                                              setDialogState(() {});
+                                            }
+                                          },
+                                          style: OutlinedButton.styleFrom(
+                                            side: const BorderSide(color: AppColors.forestGreen),
+                                            foregroundColor: AppColors.forestGreen,
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius: BorderRadius.circular(10),
+                                            ),
+                                          ),
+                                          child: const Text(
+                                            'Change PIN',
+                                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: SizedBox(
+                                        height: 36,
+                                        child: TextButton(
+                                          onPressed: () async {
+                                            final confirm = await showDialog<bool>(
+                                              context: context,
+                                              builder: (c) => AlertDialog(
+                                                shape: RoundedRectangleBorder(
+                                                  borderRadius: BorderRadius.circular(18),
+                                                ),
+                                                title: const Text(
+                                                  'Turn Off PIN Lock?',
+                                                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                                                ),
+                                                content: const Text(
+                                                  'Anyone opening this app will be able to access your expenses without entering a PIN.',
+                                                  style: TextStyle(fontSize: 13, color: AppColors.textMuted),
+                                                ),
+                                                actions: [
+                                                  TextButton(
+                                                    onPressed: () => Navigator.pop(c, false),
+                                                    child: const Text('Cancel'),
+                                                  ),
+                                                  ElevatedButton(
+                                                    style: ElevatedButton.styleFrom(
+                                                      backgroundColor: const Color(0xFFDC2626),
+                                                      foregroundColor: Colors.white,
+                                                      shape: RoundedRectangleBorder(
+                                                        borderRadius: BorderRadius.circular(10),
+                                                      ),
+                                                    ),
+                                                    onPressed: () => Navigator.pop(c, true),
+                                                    child: const Text('Turn Off'),
+                                                  ),
+                                                ],
+                                              ),
+                                            );
+                                            if (confirm == true) {
+                                              await pinService.removePin();
+                                              setDialogState(() {});
+                                            }
+                                          },
+                                          style: TextButton.styleFrom(
+                                            foregroundColor: const Color(0xFFDC2626),
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius: BorderRadius.circular(10),
+                                            ),
+                                          ),
+                                          child: const Text(
+                                            'Turn Off',
+                                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                            ],
+                          ),
                         ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-              const SizedBox(height: 18),
+                        const SizedBox(height: 18),
 
               if (user != null) ...[
                 // Push / Sync Now Button
@@ -427,10 +607,15 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ],
           ),
-        );
-      },
-    );
-  }
+        ),
+      );
+    },
+  );
+},
+);
+},
+);
+}
 
   void _showOptionsMenu(BuildContext context) {
     final user = AuthService().currentUser;
@@ -600,6 +785,38 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ),
                                 ),
                               ],
+                            ),
+                          ),
+
+                          // Calculator Quick Access Button
+                          Container(
+                            margin: const EdgeInsets.only(right: 10),
+                            width: 38,
+                            height: 38,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.white,
+                              border: Border.all(
+                                color: Colors.grey.shade300,
+                                width: 1.2,
+                              ),
+                            ),
+                            child: IconButton(
+                              padding: EdgeInsets.zero,
+                              icon: const Icon(
+                                Icons.calculate_outlined,
+                                color: AppColors.forestGreen,
+                                size: 20,
+                              ),
+                              tooltip: 'Calculator',
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const CalculatorScreen(),
+                                  ),
+                                );
+                              },
                             ),
                           ),
 
@@ -889,7 +1106,100 @@ class _HomeScreenState extends State<HomeScreen> {
                               ],
                             )
                           : Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
+                                // Tools Action Card (Calculator)
+                                Container(
+                                  margin: const EdgeInsets.only(bottom: 16),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(color: AppColors.tableBorder),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(alpha: 0.03),
+                                        blurRadius: 10,
+                                        offset: const Offset(0, 4),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Material(
+                                    color: Colors.transparent,
+                                    borderRadius: BorderRadius.circular(20),
+                                    child: InkWell(
+                                      borderRadius: BorderRadius.circular(20),
+                                      onTap: () {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) => const CalculatorScreen(),
+                                          ),
+                                        );
+                                      },
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 18,
+                                          vertical: 16,
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            Container(
+                                              width: 48,
+                                              height: 48,
+                                              decoration: BoxDecoration(
+                                                color: AppColors.mintBadgeBg,
+                                                borderRadius: BorderRadius.circular(14),
+                                              ),
+                                              child: const Icon(
+                                                Icons.calculate_rounded,
+                                                size: 26,
+                                                color: AppColors.forestGreen,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 14),
+                                            const Expanded(
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    'Calculator',
+                                                    style: TextStyle(
+                                                      fontSize: 15,
+                                                      fontWeight: FontWeight.w700,
+                                                      color: AppColors.textDark,
+                                                    ),
+                                                  ),
+                                                  SizedBox(height: 2),
+                                                  Text(
+                                                    'Full calculator with % calculation',
+                                                    style: TextStyle(
+                                                      fontSize: 12,
+                                                      color: AppColors.textMuted,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                            Container(
+                                              padding: const EdgeInsets.all(8),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFFF3F4F6),
+                                                borderRadius: BorderRadius.circular(10),
+                                              ),
+                                              child: const Icon(
+                                                Icons.arrow_forward_ios_rounded,
+                                                size: 13,
+                                                color: AppColors.textDark,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+
+                                // Insight Page kept inside Tools menu
                                 InsightsView(provider: provider),
                                 const SizedBox(height: 100),
                               ],
@@ -969,7 +1279,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
 
-            // Right Tab: Insights
+            // Right Tab: Tools (Insights inside)
             InkWell(
               borderRadius: BorderRadius.circular(12),
               onTap: () => provider.setActiveTab(1),
@@ -979,13 +1289,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
-                      Icons.show_chart_rounded,
+                      Icons.handyman_outlined,
                       size: 24,
                       color: !isTrackerTab ? AppColors.forestGreen : AppColors.textSubtle,
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Insights',
+                      'Tools',
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
@@ -1062,7 +1372,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Row(
                     children: [
                       Text(
-                        'Insights',
+                        'Tools',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w700,

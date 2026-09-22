@@ -59,8 +59,8 @@ void main() {
     await tester.tap(find.byIcon(Icons.add_rounded));
     await tester.pumpAndSettle();
 
-    // 6. Switch to Insights tab
-    await tester.tap(find.text('Insights'));
+    // 6. Switch to Tools tab
+    await tester.tap(find.text('Tools').last);
     await tester.pumpAndSettle();
 
     expect(find.text('Monthly Budget Status'), findsOneWidget);
