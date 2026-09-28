@@ -21,6 +21,7 @@ class _WeatherForecastDialogState extends State<WeatherForecastDialog> {
   bool _isLoading = true;
   WeatherSummary? _summary;
   bool _isSendingTest = false;
+  bool _isEnabled = true;
 
   @override
   void initState() {
@@ -30,11 +31,13 @@ class _WeatherForecastDialogState extends State<WeatherForecastDialog> {
 
   Future<void> _loadWeather() async {
     setState(() => _isLoading = true);
+    final isEnabled = await _weatherService.loadNotificationEnabled();
     final hours = await _weatherService.fetchHourlyForecast();
     final summary = _weatherService.generateSummary(hours);
 
     if (mounted) {
       setState(() {
+        _isEnabled = isEnabled;
         _summary = summary;
         _isLoading = false;
       });
@@ -111,6 +114,17 @@ class _WeatherForecastDialogState extends State<WeatherForecastDialog> {
                     ],
                   ),
                 ),
+                Transform.scale(
+                  scale: 0.85,
+                  child: Switch.adaptive(
+                    value: _isEnabled,
+                    activeTrackColor: Colors.orange,
+                    onChanged: (val) async {
+                      setState(() => _isEnabled = val);
+                      await _weatherService.setNotificationEnabled(val);
+                    },
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 18),
@@ -119,20 +133,30 @@ class _WeatherForecastDialogState extends State<WeatherForecastDialog> {
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: const Color(0xFFF6F8FA),
+                color: _isEnabled ? const Color(0xFFF6F8FA) : const Color(0xFFFEF2F2),
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+                border: Border.all(
+                  color: _isEnabled
+                      ? Colors.black.withValues(alpha: 0.06)
+                      : const Color(0xFFFECACA),
+                ),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.schedule_rounded, color: AppColors.forestGreen, size: 20),
+                  Icon(
+                    _isEnabled ? Icons.schedule_rounded : Icons.notifications_off_rounded,
+                    color: _isEnabled ? AppColors.forestGreen : const Color(0xFFDC2626),
+                    size: 20,
+                  ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      'Automated Push Notification delivers every morning at 9:00 AM (Dhaka time) with today\'s temperature and rain prediction.',
+                      _isEnabled
+                          ? 'Automated Push Notification delivers every morning at 9:00 AM (Dhaka time) with today\'s temperature and rain prediction.'
+                          : 'Daily 9:00 AM weather notifications are turned OFF. Toggle the switch above to enable.',
                       style: TextStyle(
                         fontSize: 12.5,
-                        color: Colors.grey.shade800,
+                        color: _isEnabled ? Colors.grey.shade800 : const Color(0xFF991B1B),
                         height: 1.4,
                       ),
                     ),

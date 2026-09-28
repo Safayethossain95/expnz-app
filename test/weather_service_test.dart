@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:expnz/services/weather_service.dart';
 
 void main() {
@@ -99,6 +100,20 @@ void main() {
       expect(summary.body, contains('Rain expected around'));
       expect(summary.body, contains('up to 65% at 1:00 PM'));
       expect(summary.body, contains('27°C - 32°C'));
+    });
+
+    test('setNotificationEnabled and loadNotificationEnabled persist state', () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      SharedPreferences.setMockInitialValues({});
+      await weatherService.setNotificationEnabled(false);
+      expect(weatherService.isNotificationEnabled, isFalse);
+      final loadedDisabled = await weatherService.loadNotificationEnabled();
+      expect(loadedDisabled, isFalse);
+
+      await weatherService.setNotificationEnabled(true);
+      expect(weatherService.isNotificationEnabled, isTrue);
+      final loadedEnabled = await weatherService.loadNotificationEnabled();
+      expect(loadedEnabled, isTrue);
     });
   });
 }

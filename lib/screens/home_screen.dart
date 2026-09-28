@@ -18,6 +18,7 @@ import '../widgets/commute_settings_dialog.dart';
 import '../widgets/top_save_indicator.dart';
 import '../services/weather_service.dart';
 import '../widgets/weather_forecast_dialog.dart';
+import '../widgets/weather_tools_card.dart';
 
 class HomeScreen extends StatefulWidget {
   final ExpenseProvider provider;
@@ -239,21 +240,34 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       },
     );
-  }  void _showAccountDialog(BuildContext context) {
+  }
+
+  void _showAccountDialog(BuildContext context) {
     final authService = AuthService();
     final user = authService.currentUser;
     final pinService = PinLockService();
+    final weatherService = WeatherService();
+    bool? weatherEnabledOverride;
 
-    showDialog(
+    showGeneralDialog(
       context: context,
-      builder: (ctx) {
+      barrierDismissible: true,
+      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+      barrierColor: Colors.black.withValues(alpha: 0.54),
+      transitionDuration: const Duration(milliseconds: 260),
+      pageBuilder: (ctx, animation, secondaryAnimation) {
         return StatefulBuilder(
           builder: (dialogContext, setDialogState) {
-            return FutureBuilder<bool>(
-              future: pinService.isPinEnabled(),
-              builder: (context, pinSnapshot) {
+            return FutureBuilder<List<dynamic>>(
+              future: Future.wait([
+                pinService.isPinEnabled(),
+                weatherService.loadNotificationEnabled(),
+              ]),
+              builder: (context, snapshot) {
                 final screenWidth = MediaQuery.sizeOf(dialogContext).width;
-                final isPinSet = pinSnapshot.data ?? false;
+                final isPinSet = snapshot.data?[0] as bool? ?? false;
+                final isWeatherEnabled = weatherEnabledOverride ??
+                    (snapshot.data?[1] as bool? ?? weatherService.isNotificationEnabled);
 
                 return AlertDialog(
                   insetPadding: EdgeInsets.symmetric(
@@ -618,60 +632,92 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         ),
                         const SizedBox(height: 10),
-                        // 9 AM Weather Automation Card
+                        // 9 AM Weather Automation Card with On/Off Toggle
                         Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: Colors.orange.withValues(alpha: 0.06),
+                            color: isWeatherEnabled
+                                ? Colors.orange.withValues(alpha: 0.06)
+                                : const Color(0xFFF9FAFB),
                             borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: Colors.orange.withValues(alpha: 0.2)),
+                            border: Border.all(
+                              color: isWeatherEnabled
+                                  ? Colors.orange.withValues(alpha: 0.25)
+                                  : const Color(0xFFE5E7EB),
+                            ),
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Row(
                                 children: [
-                                  const Icon(Icons.wb_sunny_rounded, size: 18, color: Colors.orange),
+                                  Icon(
+                                    Icons.wb_sunny_rounded,
+                                    size: 18,
+                                    color: isWeatherEnabled ? Colors.orange : AppColors.textMuted,
+                                  ),
                                   const SizedBox(width: 8),
-                                  const Expanded(
+                                  Expanded(
                                     child: Text(
                                       '9:00 AM Weather Alert',
                                       style: TextStyle(
                                         fontSize: 13,
                                         fontWeight: FontWeight.w700,
-                                        color: AppColors.textDark,
+                                        color: isWeatherEnabled ? AppColors.textDark : AppColors.textMuted,
                                       ),
                                     ),
                                   ),
-                                  TextButton(
-                                    onPressed: () {
-                                      Navigator.pop(ctx);
-                                      WeatherForecastDialog.show(context);
-                                    },
-                                    style: TextButton.styleFrom(
-                                      padding: EdgeInsets.zero,
-                                      minimumSize: const Size(60, 28),
-                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                    ),
-                                    child: const Text(
-                                      'View / Test',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.orange,
-                                      ),
+                                  Transform.scale(
+                                    scale: 0.8,
+                                    child: Switch.adaptive(
+                                      value: isWeatherEnabled,
+                                      activeTrackColor: Colors.orange,
+                                      onChanged: (val) async {
+                                        setDialogState(() {
+                                          weatherEnabledOverride = val;
+                                        });
+                                        await weatherService.setNotificationEnabled(val);
+                                      },
                                     ),
                                   ),
                                 ],
                               ),
-                              const SizedBox(height: 4),
-                              const Text(
-                                'Push notification at 9 AM with today\'s temperature and rain prediction.',
-                                style: TextStyle(
-                                  fontSize: 11.5,
-                                  color: AppColors.textMuted,
-                                  height: 1.3,
-                                ),
+                              const SizedBox(height: 2),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      isWeatherEnabled
+                                          ? 'Delivering at 9:00 AM with temperature & rain prediction.'
+                                          : 'Weather push notifications disabled. Turn on to resume.',
+                                      style: TextStyle(
+                                        fontSize: 11.5,
+                                        color: AppColors.textMuted,
+                                        height: 1.3,
+                                      ),
+                                    ),
+                                  ),
+                                  if (isWeatherEnabled)
+                                    TextButton(
+                                      onPressed: () {
+                                        Navigator.pop(ctx);
+                                        WeatherForecastDialog.show(context);
+                                      },
+                                      style: TextButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                                        minimumSize: const Size(50, 24),
+                                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                      ),
+                                      child: const Text(
+                                        'View / Test',
+                                        style: TextStyle(
+                                          fontSize: 11.5,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.orange,
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               ),
                             ],
                           ),
@@ -770,9 +816,26 @@ class _HomeScreenState extends State<HomeScreen> {
 );
 },
 );
-},
-);
-}
+      },
+      transitionBuilder: (ctx, animation, secondaryAnimation, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
+        );
+        return ScaleTransition(
+          scale: Tween<double>(begin: 0.82, end: 1.0).animate(curved),
+          child: FadeTransition(
+            opacity: CurvedAnimation(
+              parent: animation,
+              curve: Curves.easeOut,
+            ),
+            child: child,
+          ),
+        );
+      },
+    );
+  }
 
   void _showOptionsMenu(BuildContext context) {
     final user = AuthService().currentUser;
@@ -1276,6 +1339,9 @@ class _HomeScreenState extends State<HomeScreen> {
                           : Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
+                                // Live Weather Info & Forecast Tool Card
+                                const WeatherToolsCard(),
+
                                 // Tools Action Card (Calculator)
                                 Container(
                                   margin: const EdgeInsets.only(bottom: 16),

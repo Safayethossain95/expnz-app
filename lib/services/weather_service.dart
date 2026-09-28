@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'notification_service.dart';
@@ -34,6 +36,63 @@ class WeatherService {
   static const double defaultLongitude = 90.4125;
 
   static const String _prefKeyLastWeatherDate = 'expnz_last_weather_date_v1';
+  static const String _prefKeyWeatherEnabled = 'expnz_weather_enabled_v1';
+
+  bool _isNotificationEnabled = true;
+  bool get isNotificationEnabled => _isNotificationEnabled;
+
+  /// Loads notification preference from local storage and Cloud Firestore
+  Future<bool> loadNotificationEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    _isNotificationEnabled = prefs.getBool(_prefKeyWeatherEnabled) ?? true;
+
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final doc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .collection('settings')
+            .doc('weather_automation')
+            .get();
+        if (doc.exists && doc.data() != null) {
+          final cloudEnabled = doc.data()!['enabled'] as bool?;
+          if (cloudEnabled != null) {
+            _isNotificationEnabled = cloudEnabled;
+            await prefs.setBool(_prefKeyWeatherEnabled, cloudEnabled);
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading cloud weather settings: $e');
+    }
+
+    return _isNotificationEnabled;
+  }
+
+  /// Sets notification preference locally and syncs to Cloud Firestore
+  Future<void> setNotificationEnabled(bool enabled) async {
+    _isNotificationEnabled = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefKeyWeatherEnabled, enabled);
+
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .collection('settings')
+            .doc('weather_automation')
+            .set({
+          'enabled': enabled,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+    } catch (e) {
+      debugPrint('Error saving cloud weather settings: $e');
+    }
+  }
 
   String get apiKey =>
       const String.fromEnvironment('GOOGLE_MAPS_WEATHER_API_KEY', defaultValue: _defaultApiKey);
@@ -186,6 +245,11 @@ class WeatherService {
 
   /// Checks if 9:00 AM notification should be delivered today locally (failsafe if FCM is missed)
   Future<bool> checkAndApplyLocalMorningWeather() async {
+    final isEnabled = await loadNotificationEnabled();
+    if (!isEnabled) {
+      return false; // User toggled weather notifications off
+    }
+
     final now = DateTime.now();
     final todayStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
 
