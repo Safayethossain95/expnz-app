@@ -28,11 +28,18 @@ class _SignInScreenState extends State<SignInScreen> {
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
+        // Ignore if user intentionally closed the popup
+        final errStr = e.toString();
+        if (errStr.contains('popup-closed-by-user') ||
+            errStr.contains('canceled') ||
+            errStr.contains('cancelled')) {
+          return;
+        }
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: const Color(0xFF991B1B),
             content: Text(
-              'Sign-in failed: ${e.toString().replaceAll('Exception:', '')}',
+              'Sign-in failed: ${errStr.replaceAll('Exception:', '')}',
               style: const TextStyle(fontSize: 13),
             ),
             duration: const Duration(seconds: 4),

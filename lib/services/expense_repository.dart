@@ -34,18 +34,7 @@ class ExpenseRepository {
 
   // At launch the data will be 0, no table entry initially recorded
   List<ExpenseItem> getInitialSeedData({String prefix = 'initial-row'}) {
-    return List.generate(
-      5,
-      (index) => ExpenseItem(
-        id: '$prefix-${index + 1}',
-        date: DateTime.now(),
-        category: null,
-        description: '',
-        amount: 0.0,
-        isPlaceholder: true,
-        createdAt: DateTime.now().add(Duration(seconds: index)),
-      ),
-    );
+    return <ExpenseItem>[];
   }
 
   Future<List<ExpenseItem>> loadExpenses() async {

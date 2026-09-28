@@ -12,6 +12,12 @@ import '../widgets/edit_cell_dialogs.dart';
 import '../services/pin_lock_service.dart';
 import '../widgets/set_pin_dialog.dart';
 import 'calculator_screen.dart';
+import '../services/commute_automation_service.dart';
+import '../widgets/commute_review_dialog.dart';
+import '../widgets/commute_settings_dialog.dart';
+import '../widgets/top_save_indicator.dart';
+import '../services/weather_service.dart';
+import '../widgets/weather_forecast_dialog.dart';
 
 class HomeScreen extends StatefulWidget {
   final ExpenseProvider provider;
@@ -35,6 +41,30 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _scrollController = ScrollController();
+    _initCommuteRoutine();
+  }
+
+  void _initCommuteRoutine() {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      try {
+        final commuteService = CommuteAutomationService();
+        await commuteService.init(
+          onReview: (batchId) {
+            if (mounted) {
+              CommuteReviewDialog.show(
+                context,
+                batchId: batchId,
+                provider: provider,
+              );
+            }
+          },
+        );
+        await commuteService.checkAndApplyDailyCommute(provider);
+        await WeatherService().checkAndApplyLocalMorningWeather();
+      } catch (e) {
+        debugPrint('Init commute / weather routine error: $e');
+      }
+    });
   }
 
   @override
@@ -222,15 +252,22 @@ class _HomeScreenState extends State<HomeScreen> {
             return FutureBuilder<bool>(
               future: pinService.isPinEnabled(),
               builder: (context, pinSnapshot) {
+                final screenWidth = MediaQuery.sizeOf(dialogContext).width;
                 final isPinSet = pinSnapshot.data ?? false;
 
                 return AlertDialog(
+                  insetPadding: EdgeInsets.symmetric(
+                    horizontal: screenWidth * 0.03, // 3% margin on each side = 94% width
+                    vertical: 24,
+                  ),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                   contentPadding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
-                  content: SingleChildScrollView(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
+                  content: SizedBox(
+                    width: screenWidth * 0.94,
+                    child: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
                         // Avatar
                         Container(
                           width: 64,
@@ -520,6 +557,125 @@ class _HomeScreenState extends State<HomeScreen> {
                             ],
                           ),
                         ),
+                        const SizedBox(height: 14),
+
+                        // Daily Commute Section
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF9FAFB),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: const Color(0xFFE5E7EB)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(Icons.commute_rounded, size: 18, color: AppColors.forestGreen),
+                                  const SizedBox(width: 8),
+                                  const Expanded(
+                                    child: Text(
+                                      'Daily Commute Routine',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                        color: AppColors.textDark,
+                                      ),
+                                    ),
+                                  ),
+                                  TextButton(
+                                    onPressed: () {
+                                      Navigator.pop(ctx);
+                                      CommuteSettingsDialog.show(context, provider);
+                                    },
+                                    style: TextButton.styleFrom(
+                                      padding: EdgeInsets.zero,
+                                      minimumSize: const Size(60, 28),
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                    ),
+                                    child: const Text(
+                                      'Configure',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                        color: AppColors.forestGreen,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              const Text(
+                                'Auto-inserts CNG (৳80) & Metro (৳36) at 7:00 AM with 9:30 AM review prompt.',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  color: AppColors.textMuted,
+                                  height: 1.3,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        // 9 AM Weather Automation Card
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.withValues(alpha: 0.06),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: Colors.orange.withValues(alpha: 0.2)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(Icons.wb_sunny_rounded, size: 18, color: Colors.orange),
+                                  const SizedBox(width: 8),
+                                  const Expanded(
+                                    child: Text(
+                                      '9:00 AM Weather Alert',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                        color: AppColors.textDark,
+                                      ),
+                                    ),
+                                  ),
+                                  TextButton(
+                                    onPressed: () {
+                                      Navigator.pop(ctx);
+                                      WeatherForecastDialog.show(context);
+                                    },
+                                    style: TextButton.styleFrom(
+                                      padding: EdgeInsets.zero,
+                                      minimumSize: const Size(60, 28),
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                    ),
+                                    child: const Text(
+                                      'View / Test',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.orange,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              const Text(
+                                'Push notification at 9 AM with today\'s temperature and rain prediction.',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  color: AppColors.textMuted,
+                                  height: 1.3,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                         const SizedBox(height: 18),
 
               if (user != null) ...[
@@ -608,9 +764,10 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
         ),
-      );
-    },
-  );
+      ),
+    );
+  },
+);
 },
 );
 },
@@ -652,6 +809,24 @@ class _HomeScreenState extends State<HomeScreen> {
                   onTap: () {
                     Navigator.pop(ctx);
                     _showAccountDialog(context);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.commute_rounded, color: AppColors.forestGreen),
+                  title: const Text('Daily Commute Automation'),
+                  subtitle: const Text('7 AM Auto-insert & 9:30 AM Keep/Discard prompt', style: TextStyle(fontSize: 12)),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    CommuteSettingsDialog.show(context, provider);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.wb_sunny_rounded, color: Colors.orange),
+                  title: const Text('9 AM Weather Forecast Alert'),
+                  subtitle: const Text('Google Maps Weather push notification & rain forecast', style: TextStyle(fontSize: 12)),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    WeatherForecastDialog.show(context);
                   },
                 ),
                 ListTile(
@@ -708,15 +883,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _onAddRowPressed(BuildContext context) {
     provider.addNewRow();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text('Added new row. Tap cells to enter details.'),
-        backgroundColor: AppColors.forestGreen,
-        duration: const Duration(seconds: 2),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
-    );
   }
 
   @override
@@ -729,11 +895,13 @@ class _HomeScreenState extends State<HomeScreen> {
         return Scaffold(
           backgroundColor: AppColors.scaffoldBg,
           body: SafeArea(
-            child: provider.isLoading
-                ? const Center(
-                    child: CircularProgressIndicator(color: AppColors.forestGreen),
-                  )
-                : CustomScrollView(
+            child: Stack(
+              children: [
+                provider.isLoading
+                    ? const Center(
+                        child: CircularProgressIndicator(color: AppColors.forestGreen),
+                      )
+                    : CustomScrollView(
                     key: const PageStorageKey<String>('home_custom_scroll_view'),
                     controller: _scrollController,
                     physics: const BouncingScrollPhysics(),
@@ -1208,6 +1376,20 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ],
               ),
+                // Animated Top Center Save Icon
+                Positioned(
+                  top: 10,
+                  left: 0,
+                  right: 0,
+                  child: Center(
+                    child: TopSaveIndicator(
+                      lastSavedAt: provider.lastSavedAt,
+                      isCloud: provider.isCloudSynced,
+                    ),
+                  ),
+                ),
+              ],
+            ),
       ),
 
       // Floating / Docked Bottom Navigation Bar

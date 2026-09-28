@@ -5,10 +5,14 @@ import 'providers/expense_provider.dart';
 import 'screens/auth_gate.dart';
 import 'theme/app_theme.dart';
 
+import 'firebase_options.dart';
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
-    await Firebase.initializeApp();
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
   } catch (e) {
     debugPrint('Firebase.initializeApp error: $e');
   }

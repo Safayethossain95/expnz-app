@@ -34,6 +34,7 @@ class ExpenseItem {
   final double amount;
   final bool isPlaceholder;
   final DateTime createdAt;
+  final String? batchId;
 
   const ExpenseItem({
     required this.id,
@@ -43,6 +44,7 @@ class ExpenseItem {
     this.amount = 0.0,
     this.isPlaceholder = false,
     required this.createdAt,
+    this.batchId,
   });
 
   ExpenseItem copyWith({
@@ -54,6 +56,7 @@ class ExpenseItem {
     double? amount,
     bool? isPlaceholder,
     DateTime? createdAt,
+    String? batchId,
   }) {
     return ExpenseItem(
       id: id ?? this.id,
@@ -63,6 +66,7 @@ class ExpenseItem {
       amount: amount ?? this.amount,
       isPlaceholder: isPlaceholder ?? this.isPlaceholder,
       createdAt: createdAt ?? this.createdAt,
+      batchId: batchId ?? this.batchId,
     );
   }
 
@@ -75,6 +79,7 @@ class ExpenseItem {
       'amount': amount,
       'isPlaceholder': isPlaceholder,
       'createdAt': createdAt.toIso8601String(),
+      if (batchId != null) 'batchId': batchId,
     };
   }
 
@@ -89,6 +94,7 @@ class ExpenseItem {
       createdAt: map['createdAt'] != null
           ? DateTime.tryParse(map['createdAt'] as String) ?? DateTime.now()
           : DateTime.now(),
+      batchId: map['batchId'] as String?,
     );
   }
 }

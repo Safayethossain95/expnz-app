@@ -12,52 +12,7 @@ class ExpenseSheetTable extends StatelessWidget {
   });
 
   void _showDbSaveToast(BuildContext context) {
-    ScaffoldMessenger.of(context).clearSnackBars();
-    final isCloud = provider.isCloudSynced;
-    final syncError = provider.lastSyncError;
-
-    String message;
-    Color bg;
-    IconData icon;
-
-    if (syncError != null) {
-      message = 'Saved locally • Cloud DB error: $syncError';
-      bg = const Color(0xFF991B1B);
-      icon = Icons.warning_amber_rounded;
-    } else if (isCloud) {
-      message = 'Saved to Cloud Database (Firestore)';
-      bg = AppColors.forestGreen;
-      icon = Icons.cloud_done_rounded;
-    } else {
-      message = 'Saved to Local DB (Sign in to sync with Cloud)';
-      bg = const Color(0xFF334155);
-      icon = Icons.save_rounded;
-    }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: Colors.white, size: 18),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                message,
-                style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
-                overflow: TextOverflow.ellipsis,
-                maxLines: 2,
-              ),
-            ),
-          ],
-        ),
-        backgroundColor: bg,
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(milliseconds: 1800),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-      ),
-    );
+    // Intentionally no toast - top center animated indicator handles save feedback
   }
 
   @override

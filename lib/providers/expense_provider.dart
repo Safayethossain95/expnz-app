@@ -25,6 +25,7 @@ class ExpenseProvider extends ChangeNotifier {
   int _activeTabIndex = 0; // 0 = Tracker, 1 = Insights
   DateTime _lastSavedAt = DateTime.now();
   bool _isLoading = true;
+  int _extraEmptyRows = 2;
 
   ExpenseProvider() {
     _init();
@@ -91,9 +92,18 @@ class ExpenseProvider extends ChangeNotifier {
     _isLoading = true;
     notifyListeners();
 
-    _expenses = await _repository.loadExpenses();
-    _monthlyDistributionExpenses = await _repository.loadMonthlyDistributionExpenses();
+    final loadedExpenses = await _repository.loadExpenses();
+    _expenses = loadedExpenses
+        .where((e) => !e.isPlaceholder && (e.amount > 0 || e.description.isNotEmpty || e.category != null))
+        .toList();
+
+    final loadedMonthly = await _repository.loadMonthlyDistributionExpenses();
+    _monthlyDistributionExpenses = loadedMonthly
+        .where((e) => !e.isPlaceholder && (e.amount > 0 || e.description.isNotEmpty || e.category != null))
+        .toList();
+
     _monthlyBudget = await _repository.loadBudget();
+    _extraEmptyRows = 2;
     _isLoading = false;
     notifyListeners();
   }
@@ -108,6 +118,7 @@ class ExpenseProvider extends ChangeNotifier {
   void setFilterMode(DateFilterMode mode, {DateTime? customDate}) {
     _filterMode = mode;
     _customSelectedDate = customDate;
+    _extraEmptyRows = 2; // Always reset to 2 empty rows on page change
     notifyListeners();
   }
 
@@ -137,44 +148,42 @@ class ExpenseProvider extends ChangeNotifier {
     }
   }
 
-  // Active recorded expenses (excluding empty placeholders) matching current filter
+  // Active recorded expenses matching current filter
   List<ExpenseItem> get activeExpenses {
     if (isMonthlyDistributionMode) {
       return _monthlyDistributionExpenses
-          .where((e) => !e.isPlaceholder && e.amount > 0)
+          .where((e) => !e.isPlaceholder && (e.amount > 0 || e.description.isNotEmpty || e.category != null))
           .toList();
     }
     return _expenses
-        .where((e) => !e.isPlaceholder && e.amount > 0 && _matchesDateFilter(e))
+        .where((e) => !e.isPlaceholder && (e.amount > 0 || e.description.isNotEmpty || e.category != null) && _matchesDateFilter(e))
         .toList();
   }
 
-  // Rows displayed in the sheet table (minimum 5 rows, all rows visible even if > 5)
+  // Rows displayed in the table: all recorded entries + exactly 2 extra empty rows (plus any added via '+')
   List<ExpenseItem> get tableRows {
-    if (isMonthlyDistributionMode) {
-      while (_monthlyDistributionExpenses.length < 5) {
-        final blank = _repository.createNewBlankItem(isPlaceholder: true);
-        _monthlyDistributionExpenses.add(blank);
-      }
-      return _monthlyDistributionExpenses;
-    }
+    final realList = isMonthlyDistributionMode
+        ? _monthlyDistributionExpenses
+            .where((e) => !e.isPlaceholder && (e.amount > 0 || e.description.isNotEmpty || e.category != null))
+            .toList()
+        : _expenses
+            .where((e) => !e.isPlaceholder && (e.amount > 0 || e.description.isNotEmpty || e.category != null) && _matchesDateFilter(e))
+            .toList();
 
-    final filtered = _expenses.where((e) {
-      if (e.isPlaceholder) return true;
-      return _matchesDateFilter(e);
-    }).toList();
-
-    // Ensure we show at least 5 rows
-    while (filtered.length < 5) {
-      final blank = _repository.createNewBlankItem(
-        isPlaceholder: true,
+    final placeholders = List.generate(
+      _extraEmptyRows,
+      (index) => ExpenseItem(
+        id: 'placeholder_${_filterMode.name}_$index',
         date: currentEffectiveDate,
-      );
-      _expenses.add(blank);
-      filtered.add(blank);
-    }
+        category: null,
+        description: '',
+        amount: 0.0,
+        isPlaceholder: true,
+        createdAt: DateTime.now().add(Duration(milliseconds: index)),
+      ),
+    );
 
-    return filtered;
+    return [...realList, ...placeholders];
   }
 
   double get totalSpent {
@@ -204,89 +213,37 @@ class ExpenseProvider extends ChangeNotifier {
     return map;
   }
 
-  // Add a new row when the '+' icon is tapped
+  // Add a new row: if called without data (e.g. '+' button), adds one more empty row!
   Future<void> addNewRow({
     DateTime? date,
     ExpenseCategory? category,
     String description = '',
     double amount = 0.0,
   }) async {
-    final effectiveDate = date ?? currentEffectiveDate;
-
-    if (isMonthlyDistributionMode) {
-      final firstPlaceholderIndex = _monthlyDistributionExpenses.indexWhere((e) => e.isPlaceholder);
-      if (firstPlaceholderIndex != -1) {
-        _monthlyDistributionExpenses[firstPlaceholderIndex] = ExpenseItem(
-          id: _monthlyDistributionExpenses[firstPlaceholderIndex].id,
-          date: effectiveDate,
-          category: category ?? ExpenseCategory.food,
-          description: description,
-          amount: amount,
-          isPlaceholder: false,
-          createdAt: DateTime.now(),
-        );
-        final newBlank = _repository.createNewBlankItem(isPlaceholder: true);
-        _monthlyDistributionExpenses.add(newBlank);
-      } else {
-        final newItem = ExpenseItem(
-          id: _repository.createNewBlankItem().id,
-          date: effectiveDate,
-          category: category ?? ExpenseCategory.food,
-          description: description,
-          amount: amount,
-          isPlaceholder: false,
-          createdAt: DateTime.now(),
-        );
-        _monthlyDistributionExpenses.add(newItem);
-        final newBlank = _repository.createNewBlankItem(isPlaceholder: true);
-        _monthlyDistributionExpenses.add(newBlank);
-      }
-
-      _lastSavedAt = DateTime.now();
-      notifyListeners();
-      await _repository.saveMonthlyDistributionExpenses(_monthlyDistributionExpenses);
-      return;
-    }
-
-    // Standard table logic
-    final firstPlaceholderIndex = _expenses.indexWhere((e) => e.isPlaceholder);
-    if (firstPlaceholderIndex != -1) {
-      _expenses[firstPlaceholderIndex] = ExpenseItem(
-        id: _expenses[firstPlaceholderIndex].id,
-        date: effectiveDate,
-        category: category ?? ExpenseCategory.food,
-        description: description,
-        amount: amount,
-        isPlaceholder: false,
-        createdAt: DateTime.now(),
-      );
-      // Append a new blank row at the end so it keeps expanding
-      final newBlank = _repository.createNewBlankItem(
-        isPlaceholder: true,
-        date: effectiveDate,
-      );
-      _expenses.add(newBlank);
-    } else {
+    if (category != null || description.isNotEmpty || amount > 0) {
       final newItem = ExpenseItem(
         id: _repository.createNewBlankItem().id,
-        date: effectiveDate,
-        category: category ?? ExpenseCategory.food,
+        date: date ?? currentEffectiveDate,
+        category: category,
         description: description,
         amount: amount,
         isPlaceholder: false,
         createdAt: DateTime.now(),
       );
-      _expenses.add(newItem);
-      final newBlank = _repository.createNewBlankItem(
-        isPlaceholder: true,
-        date: effectiveDate,
-      );
-      _expenses.add(newBlank);
+      if (isMonthlyDistributionMode) {
+        _monthlyDistributionExpenses.add(newItem);
+        await _repository.saveMonthlyDistributionExpenses(_monthlyDistributionExpenses);
+      } else {
+        _expenses.add(newItem);
+        await _repository.saveExpenses(_expenses);
+      }
+    } else {
+      // User tapped "+" button: adds one more empty row to the view
+      _extraEmptyRows++;
     }
 
     _lastSavedAt = DateTime.now();
     notifyListeners();
-    await _repository.saveExpenses(_expenses);
   }
 
   Future<void> updateCell({
@@ -299,11 +256,27 @@ class ExpenseProvider extends ChangeNotifier {
   }) async {
     if (isMonthlyDistributionMode) {
       final index = _monthlyDistributionExpenses.indexWhere((e) => e.id == id);
-      if (index == -1) return;
+      if (index == -1) {
+        if ((amount ?? 0) > 0 || (description ?? '').isNotEmpty || category != null) {
+          final newItem = ExpenseItem(
+            id: _repository.createNewBlankItem().id,
+            date: date ?? currentEffectiveDate,
+            category: category,
+            description: description ?? '',
+            amount: amount ?? 0.0,
+            isPlaceholder: false,
+            createdAt: DateTime.now(),
+          );
+          _monthlyDistributionExpenses.add(newItem);
+          if (_extraEmptyRows > 2) _extraEmptyRows--;
+          _lastSavedAt = DateTime.now();
+          notifyListeners();
+          await _repository.saveMonthlyDistributionExpenses(_monthlyDistributionExpenses);
+        }
+        return;
+      }
 
       final current = _monthlyDistributionExpenses[index];
-      final wasPlaceholder = current.isPlaceholder;
-
       final updated = current.copyWith(
         date: date ?? current.date ?? DateTime.now(),
         category: category,
@@ -314,36 +287,36 @@ class ExpenseProvider extends ChangeNotifier {
       );
 
       _monthlyDistributionExpenses[index] = updated;
-
-      if (wasPlaceholder) {
-        final newPlaceholder = _repository.createNewBlankItem(isPlaceholder: true);
-        _monthlyDistributionExpenses.add(newPlaceholder);
-      }
-
       _lastSavedAt = DateTime.now();
       notifyListeners();
       await _repository.saveMonthlyDistributionExpenses(_monthlyDistributionExpenses);
       return;
     }
 
-    // Standard update
     final index = _expenses.indexWhere((e) => e.id == id);
-    if (index == -1) return;
-
-    final current = _expenses[index];
-    final wasPlaceholder = current.isPlaceholder;
-
-    final DateTime targetDate;
-    if (date != null) {
-      targetDate = date;
-    } else if (wasPlaceholder) {
-      targetDate = currentEffectiveDate;
-    } else {
-      targetDate = current.date ?? currentEffectiveDate;
+    if (index == -1) {
+      if ((amount ?? 0) > 0 || (description ?? '').isNotEmpty || category != null) {
+        final newItem = ExpenseItem(
+          id: _repository.createNewBlankItem().id,
+          date: date ?? currentEffectiveDate,
+          category: category,
+          description: description ?? '',
+          amount: amount ?? 0.0,
+          isPlaceholder: false,
+          createdAt: DateTime.now(),
+        );
+        _expenses.add(newItem);
+        if (_extraEmptyRows > 2) _extraEmptyRows--;
+        _lastSavedAt = DateTime.now();
+        notifyListeners();
+        await _repository.saveExpenses(_expenses);
+      }
+      return;
     }
 
+    final current = _expenses[index];
     final updated = current.copyWith(
-      date: targetDate,
+      date: date ?? current.date ?? currentEffectiveDate,
       category: category,
       clearCategory: clearCategory,
       description: description ?? current.description,
@@ -352,16 +325,27 @@ class ExpenseProvider extends ChangeNotifier {
     );
 
     _expenses[index] = updated;
+    _lastSavedAt = DateTime.now();
+    notifyListeners();
+    await _repository.saveExpenses(_expenses);
+  }
 
-    // If a placeholder was filled, add another placeholder at bottom to keep rows available
-    if (wasPlaceholder) {
-      final newPlaceholder = _repository.createNewBlankItem(
-        isPlaceholder: true,
-        date: currentEffectiveDate,
-      );
-      _expenses.add(newPlaceholder);
-    }
+  Future<void> addExpenseItem(ExpenseItem item) async {
+    _expenses.add(item);
+    _lastSavedAt = DateTime.now();
+    notifyListeners();
+    await _repository.saveExpenses(_expenses);
+  }
 
+  Future<void> addExpenseItems(List<ExpenseItem> items) async {
+    _expenses.addAll(items);
+    _lastSavedAt = DateTime.now();
+    notifyListeners();
+    await _repository.saveExpenses(_expenses);
+  }
+
+  Future<void> deleteItemsByBatchId(String batchId) async {
+    _expenses.removeWhere((e) => e.batchId == batchId);
     _lastSavedAt = DateTime.now();
     notifyListeners();
     await _repository.saveExpenses(_expenses);
@@ -390,15 +374,16 @@ class ExpenseProvider extends ChangeNotifier {
   }
 
   Future<void> resetToBlank() async {
+    _extraEmptyRows = 2;
     if (isMonthlyDistributionMode) {
-      _monthlyDistributionExpenses = _repository.getInitialSeedData(prefix: 'monthly-dist');
+      _monthlyDistributionExpenses = [];
       _lastSavedAt = DateTime.now();
       notifyListeners();
       await _repository.saveMonthlyDistributionExpenses(_monthlyDistributionExpenses);
       return;
     }
 
-    _expenses = _repository.getInitialSeedData();
+    _expenses = [];
     _monthlyBudget = ExpenseRepository.defaultMonthlyBudget;
     _filterMode = DateFilterMode.thisMonth;
     _lastSavedAt = DateTime.now();
