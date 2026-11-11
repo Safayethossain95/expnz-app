@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import '../models/expense_model.dart';
 import '../services/expense_repository.dart';
 import '../services/month_start_service.dart';
+import '../theme/app_theme.dart';
 
 enum DateFilterMode {
   allTime('All time'),
@@ -22,6 +23,7 @@ class ExpenseProvider extends ChangeNotifier {
 
   List<ExpenseItem> _expenses = [];
   List<ExpenseItem> _monthlyDistributionExpenses = [];
+  final Set<String> _selectedMonthlyDistributionIds = {};
   double _monthlyBudget = ExpenseRepository.defaultMonthlyBudget;
   DateFilterMode _filterMode = DateFilterMode.thisMonth;
   DateTime? _customSelectedDate;
@@ -39,6 +41,7 @@ class ExpenseProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   List<ExpenseItem> get allExpenses => _expenses;
   List<ExpenseItem> get monthlyDistributionExpenses => _monthlyDistributionExpenses;
+  Set<String> get selectedMonthlyDistributionIds => _selectedMonthlyDistributionIds;
   double get monthlyBudget => _monthlyBudget;
   DateFilterMode get filterMode => _filterMode;
   DateTime? get customSelectedDate => _customSelectedDate;
@@ -53,13 +56,52 @@ class ExpenseProvider extends ChangeNotifier {
   MonthPeriod get selectedMonthlyDistributionPeriod =>
       _selectedMonthlyDistributionPeriod ?? currentMonthPeriod;
 
+  MonthPeriod get nextMonthlyDistributionPeriod =>
+      _monthStartService.nextPeriodOf(selectedMonthlyDistributionPeriod);
+
   MonthPeriod? get selectedExpenseMonthPeriod => _selectedExpenseMonthPeriod;
 
-  List<MonthPeriod> get availableMonthPeriods => _monthStartService.generatePeriods();
+  List<MonthPeriod> get availableMonthPeriods {
+    final periods = _monthStartService.generatePeriods(count: 24, futureCount: 2);
+    if (_selectedMonthlyDistributionPeriod != null &&
+        !periods.contains(_selectedMonthlyDistributionPeriod)) {
+      periods.insert(0, _selectedMonthlyDistributionPeriod!);
+    }
+    return periods;
+  }
+
+  bool isRowSelected(String id) => _selectedMonthlyDistributionIds.contains(id);
+
+  void toggleRowSelection(String id) {
+    if (_selectedMonthlyDistributionIds.contains(id)) {
+      _selectedMonthlyDistributionIds.remove(id);
+    } else {
+      _selectedMonthlyDistributionIds.add(id);
+    }
+    notifyListeners();
+  }
+
+  void selectAllMonthlyDistributionRows() {
+    final activeIds = activeExpenses.map((e) => e.id).toSet();
+    if (_selectedMonthlyDistributionIds.containsAll(activeIds) && activeIds.isNotEmpty) {
+      _selectedMonthlyDistributionIds.clear();
+    } else {
+      _selectedMonthlyDistributionIds.addAll(activeIds);
+    }
+    notifyListeners();
+  }
+
+  void clearMonthlyDistributionSelection() {
+    if (_selectedMonthlyDistributionIds.isNotEmpty) {
+      _selectedMonthlyDistributionIds.clear();
+      notifyListeners();
+    }
+  }
 
   void setSelectedMonthlyDistributionPeriod(MonthPeriod period) {
     _selectedMonthlyDistributionPeriod = period;
     _extraEmptyRows = 2;
+    _selectedMonthlyDistributionIds.clear();
     notifyListeners();
   }
 
@@ -67,6 +109,7 @@ class ExpenseProvider extends ChangeNotifier {
     _filterMode = DateFilterMode.monthPeriod;
     _selectedExpenseMonthPeriod = period;
     _extraEmptyRows = 2;
+    _selectedMonthlyDistributionIds.clear();
     notifyListeners();
   }
 
@@ -165,6 +208,7 @@ class ExpenseProvider extends ChangeNotifier {
     _filterMode = mode;
     _customSelectedDate = customDate;
     _extraEmptyRows = 2; // Always reset to 2 empty rows on page change
+    _selectedMonthlyDistributionIds.clear();
     notifyListeners();
   }
 
@@ -205,7 +249,7 @@ class ExpenseProvider extends ChangeNotifier {
           .where((e) =>
               !e.isPlaceholder &&
               (e.amount > 0 || e.description.isNotEmpty || e.category != null) &&
-              (e.date == null ? period.isCurrent : period.contains(e.date!)))
+              period.contains(e.date ?? e.createdAt))
           .toList();
     }
     return _expenses
@@ -310,7 +354,7 @@ class ExpenseProvider extends ChangeNotifier {
       if (index == -1) {
         if ((amount ?? 0) > 0 || (description ?? '').isNotEmpty || category != null) {
           final newItem = ExpenseItem(
-            id: _repository.createNewBlankItem().id,
+            id: id,
             date: date ?? currentEffectiveDate,
             category: category,
             description: description ?? '',
@@ -348,7 +392,7 @@ class ExpenseProvider extends ChangeNotifier {
     if (index == -1) {
       if ((amount ?? 0) > 0 || (description ?? '').isNotEmpty || category != null) {
         final newItem = ExpenseItem(
-          id: _repository.createNewBlankItem().id,
+          id: id,
           date: date ?? currentEffectiveDate,
           category: category,
           description: description ?? '',
@@ -403,6 +447,7 @@ class ExpenseProvider extends ChangeNotifier {
   }
 
   Future<void> deleteRow(String id) async {
+    _selectedMonthlyDistributionIds.remove(id);
     if (isMonthlyDistributionMode) {
       _monthlyDistributionExpenses.removeWhere((e) => e.id == id);
       _lastSavedAt = DateTime.now();
@@ -438,9 +483,9 @@ class ExpenseProvider extends ChangeNotifier {
     final oct15 = DateTime(2026, 10, 15);
     return _monthlyDistributionExpenses.any((e) {
       if (e.isPlaceholder) return false;
-      if (e.date == null) return true;
-      final d = DateTime(e.date!.year, e.date!.month, e.date!.day);
-      return !d.isBefore(sep15) && !d.isAfter(oct15);
+      final itemDate = e.date ?? e.createdAt;
+      final d = DateTime(itemDate.year, itemDate.month, itemDate.day);
+      return !d.isBefore(sep15) && d.isBefore(oct15);
     });
   }
 
@@ -452,34 +497,29 @@ class ExpenseProvider extends ChangeNotifier {
 
     final updatedList = <ExpenseItem>[];
     for (final item in _monthlyDistributionExpenses) {
-      if (item.date != null) {
-        final d = DateTime(item.date!.year, item.date!.month, item.date!.day);
-        // If the date falls within 15 Sep - 15 Oct (inclusive)
-        if (!d.isBefore(sep15) && !d.isAfter(oct15)) {
-          // Advance month by 1 to place it in 15 Oct - 15 Nov
-          final newYear = item.date!.month == 12 ? item.date!.year + 1 : item.date!.year;
-          final newMonth = item.date!.month == 12 ? 1 : item.date!.month + 1;
-          final maxDays = DateTime(newYear, newMonth + 1, 0).day;
-          final newDay = item.date!.day.clamp(1, maxDays);
+      final itemDate = item.date ?? item.createdAt;
+      final d = DateTime(itemDate.year, itemDate.month, itemDate.day);
+      // If the date falls within 15 Sep - 15 Oct (inclusive start, exclusive end)
+      if (!d.isBefore(sep15) && d.isBefore(oct15)) {
+        // Advance month by 1 to place it in 15 Oct - 15 Nov
+        final newYear = itemDate.month == 12 ? itemDate.year + 1 : itemDate.year;
+        final newMonth = itemDate.month == 12 ? 1 : itemDate.month + 1;
+        final maxDays = DateTime(newYear, newMonth + 1, 0).day;
+        final newDay = itemDate.day.clamp(1, maxDays);
 
-          final movedDate = DateTime(
-            newYear,
-            newMonth,
-            newDay,
-            item.date!.hour,
-            item.date!.minute,
-            item.date!.second,
-          );
+        final movedDate = DateTime(
+          newYear,
+          newMonth,
+          newDay,
+          itemDate.hour,
+          itemDate.minute,
+          itemDate.second,
+        );
 
-          updatedList.add(item.copyWith(date: movedDate));
-          movedCount++;
-        } else {
-          updatedList.add(item);
-        }
-      } else {
-        // If date is null, place it in the current 15 Oct - 15 Nov period
-        updatedList.add(item.copyWith(date: DateTime(2026, 10, 15)));
+        updatedList.add(item.copyWith(date: movedDate));
         movedCount++;
+      } else {
+        updatedList.add(item);
       }
     }
 
@@ -494,12 +534,81 @@ class ExpenseProvider extends ChangeNotifier {
     return movedCount;
   }
 
+  /// Copies selected monthly distribution items into the next month's distribution.
+  /// If next month already has entries, appends them after the existing entries of next month.
+  /// If next month has no entries, inserts them from the beginning.
+  Future<int> copySelectedToNextMonth() async {
+    if (_selectedMonthlyDistributionIds.isEmpty) return 0;
+
+    final currentPeriod = selectedMonthlyDistributionPeriod;
+    final nextPeriod = _monthStartService.nextPeriodOf(currentPeriod);
+
+    // Get the selected items in their current display order
+    final selectedItems = activeExpenses
+        .where((e) => _selectedMonthlyDistributionIds.contains(e.id))
+        .toList();
+
+    if (selectedItems.isEmpty) return 0;
+
+    // Check existing next month items
+    final existingNextMonthItems = _monthlyDistributionExpenses
+        .where((e) =>
+            !e.isPlaceholder &&
+            (e.amount > 0 || e.description.isNotEmpty || e.category != null) &&
+            nextPeriod.contains(e.date ?? e.createdAt))
+        .toList();
+
+    // Prepare copies with date set to nextPeriod.start and unique IDs
+    final now = DateTime.now();
+    final copiedItems = <ExpenseItem>[];
+    for (int i = 0; i < selectedItems.length; i++) {
+      final original = selectedItems[i];
+      copiedItems.add(ExpenseItem(
+        id: _repository.createNewBlankItem().id,
+        date: nextPeriod.start,
+        category: original.category,
+        description: original.description,
+        amount: original.amount,
+        isPlaceholder: false,
+        createdAt: now.add(Duration(milliseconds: i)),
+      ));
+    }
+
+    if (existingNextMonthItems.isNotEmpty) {
+      // Find the last index of an existing next month item in _monthlyDistributionExpenses
+      int lastNextIndex = -1;
+      for (int i = 0; i < _monthlyDistributionExpenses.length; i++) {
+        final item = _monthlyDistributionExpenses[i];
+        if (!item.isPlaceholder && nextPeriod.contains(item.date ?? item.createdAt)) {
+          lastNextIndex = i;
+        }
+      }
+      if (lastNextIndex != -1) {
+        _monthlyDistributionExpenses.insertAll(lastNextIndex + 1, copiedItems);
+      } else {
+        _monthlyDistributionExpenses.addAll(copiedItems);
+      }
+    } else {
+      // If no values exist in next month, insert from the beginning
+      _monthlyDistributionExpenses.addAll(copiedItems);
+    }
+
+    final count = copiedItems.length;
+    _selectedMonthlyDistributionIds.clear();
+    _lastSavedAt = DateTime.now();
+    notifyListeners();
+
+    await _repository.saveMonthlyDistributionExpenses(_monthlyDistributionExpenses);
+    return count;
+  }
+
   Future<void> resetToBlank() async {
     _extraEmptyRows = 2;
+    _selectedMonthlyDistributionIds.clear();
     if (isMonthlyDistributionMode) {
       final period = selectedMonthlyDistributionPeriod;
       _monthlyDistributionExpenses.removeWhere((e) =>
-          e.date == null ? period.isCurrent : period.contains(e.date!));
+          period.contains(e.date ?? e.createdAt));
       _lastSavedAt = DateTime.now();
       notifyListeners();
       await _repository.saveMonthlyDistributionExpenses(_monthlyDistributionExpenses);
@@ -523,7 +632,7 @@ class ExpenseProvider extends ChangeNotifier {
       final dateStr = item.date != null ? DateFormat('dd/MM/yyyy').format(item.date!) : '';
       final cat = item.category?.label ?? '';
       final desc = '"${item.description.replaceAll('"', '""')}"';
-      final amt = item.amount.toStringAsFixed(2);
+      final amt = formatAmount(item.amount);
       buffer.writeln('$sl,$dateStr,$cat,$desc,$amt');
       sl++;
     }

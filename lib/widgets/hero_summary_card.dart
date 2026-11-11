@@ -15,9 +15,8 @@ class HeroSummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final currencyFormat = NumberFormat.currency(symbol: '৳', decimalDigits: 2);
-    final totalSpentStr = currencyFormat.format(provider.totalSpent);
-    final budgetDeltaStr = currencyFormat.format(provider.budgetDelta.abs());
+    final totalSpentStr = formatCurrency(provider.totalSpent, useGrouping: true);
+    final budgetDeltaStr = formatCurrency(provider.budgetDelta.abs(), useGrouping: true);
     final isUnderBudget = provider.isUnderBudget;
 
     return Container(

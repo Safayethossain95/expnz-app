@@ -95,7 +95,7 @@ class CommuteReviewDialog extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        '9:30 AM Review • ৳${total.toStringAsFixed(2)}',
+                        '9:30 AM Review • ${formatCurrency(total)}',
                         style: const TextStyle(
                           fontSize: 12.5,
                           fontWeight: FontWeight.w600,
@@ -187,7 +187,7 @@ class CommuteReviewDialog extends StatelessWidget {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
                             content: Text(
-                              'Daily commute added (৳${total.toStringAsFixed(2)})',
+                              'Daily commute added (${formatCurrency(total)})',
                             ),
                             backgroundColor: AppColors.forestGreen,
                             duration: const Duration(seconds: 3),
@@ -273,7 +273,7 @@ class CommuteReviewDialog extends StatelessWidget {
 
           // Amount
           Text(
-            '৳${item.amount.toStringAsFixed(2)}',
+            formatCurrency(item.amount),
             style: const TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w800,

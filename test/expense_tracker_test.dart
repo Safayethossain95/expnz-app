@@ -11,13 +11,13 @@ void main() {
   });
 
   group('Expense Tracker Taka & SL Column Tests', () {
-    test('At launch data is 0 with 5 blank placeholder rows for SL 1..5', () async {
+    test('At launch data is 0 with 2 blank placeholder rows for SL 1..2', () async {
       final provider = ExpenseProvider();
       await Future.delayed(const Duration(milliseconds: 100));
 
       expect(provider.totalSpent, 0.0);
       expect(provider.totalEntriesCount, 0);
-      expect(provider.tableRows.length, 5);
+      expect(provider.tableRows.length, 2);
       expect(provider.tableRows.every((e) => e.isPlaceholder), isTrue);
     });
 
@@ -33,7 +33,7 @@ void main() {
 
       expect(provider.totalSpent, 850.00);
       expect(provider.totalEntriesCount, 1);
-      expect(provider.tableRows.length, greaterThanOrEqualTo(5));
+      expect(provider.tableRows.length, greaterThanOrEqualTo(2));
     });
 
     test('Updating cell edits fields and recalculates Taka total', () async {
@@ -231,7 +231,7 @@ void main() {
       expect(csv.contains('SL,Date,Category,Description,Amount (BDT)'), isTrue);
       expect(csv.contains('1,'), isTrue);
       expect(csv.contains('Lunch'), isTrue);
-      expect(csv.contains('150.00'), isTrue);
+      expect(csv.contains('150'), isTrue);
     });
   });
 }

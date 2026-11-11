@@ -215,7 +215,7 @@ class _CommuteSettingsDialogState extends State<CommuteSettingsDialog> {
                             ),
                           ),
                           Text(
-                            '৳${_items[i].amount.toStringAsFixed(2)}',
+                            formatCurrency(_items[i].amount),
                             style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
                           ),
                         ],

@@ -14,7 +14,6 @@ class InsightsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final currencyFormat = NumberFormat.currency(symbol: '৳', decimalDigits: 2);
     final totalSpent = provider.totalSpent;
     final budget = provider.monthlyBudget;
     final budgetPercent = budget > 0 ? (totalSpent / budget).clamp(0.0, 1.0) : 0.0;
@@ -99,7 +98,7 @@ class InsightsView extends StatelessWidget {
                           style: TextStyle(color: Color(0xFF94B5A5), fontSize: 11),
                         ),
                         Text(
-                          currencyFormat.format(totalSpent),
+                          formatCurrency(totalSpent, useGrouping: true),
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 16,
@@ -116,7 +115,7 @@ class InsightsView extends StatelessWidget {
                           style: TextStyle(color: Color(0xFF94B5A5), fontSize: 11),
                         ),
                         Text(
-                          currencyFormat.format(provider.budgetDelta.abs()),
+                          formatCurrency(provider.budgetDelta.abs(), useGrouping: true),
                           style: TextStyle(
                             color: provider.isUnderBudget
                                 ? const Color(0xFFCBEAD9)
@@ -141,7 +140,7 @@ class InsightsView extends StatelessWidget {
               Expanded(
                 child: _buildMetricTile(
                   title: 'Daily Average',
-                  value: currencyFormat.format(avgDailySpend),
+                  value: formatCurrency(avgDailySpend, useGrouping: true),
                   icon: Icons.calendar_view_day_rounded,
                   iconColor: AppColors.forestGreen,
                   bgColor: AppColors.mintBadgeBg,
@@ -238,7 +237,7 @@ class InsightsView extends StatelessWidget {
                             ),
                             const Spacer(),
                             Text(
-                              currencyFormat.format(amt),
+                              formatCurrency(amt, useGrouping: true),
                               style: const TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w700,

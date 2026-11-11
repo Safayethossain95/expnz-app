@@ -1,5 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
+
+/// Formats numerical amounts without trailing `.00` (e.g. 3000 instead of 3000.00).
+String formatAmount(num amount, {bool useGrouping = false}) {
+  if (amount % 1 == 0) {
+    if (useGrouping) {
+      return NumberFormat.currency(symbol: '', decimalDigits: 0).format(amount).trim();
+    }
+    return '${amount.toInt()}';
+  }
+  if (useGrouping) {
+    return NumberFormat.currency(symbol: '', decimalDigits: 2).format(amount).trim();
+  }
+  return amount.toStringAsFixed(2);
+}
+
+/// Formats currency with taka symbol (৳) without trailing `.00` (e.g. ৳3000).
+String formatCurrency(num amount, {String symbol = '৳', bool useGrouping = false}) {
+  return '$symbol${formatAmount(amount, useGrouping: useGrouping)}';
+}
 
 class AppColors {
   // Primary Forest Green Palette

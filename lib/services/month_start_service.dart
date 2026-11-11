@@ -118,10 +118,34 @@ class MonthStartService {
     );
   }
 
-  /// Generates the current period plus [count] previous periods (default 24 months).
-  List<MonthPeriod> generatePeriods({int count = 24}) {
+  /// Returns the next [MonthPeriod] after [period].
+  MonthPeriod nextPeriodOf(MonthPeriod period) {
+    final nStart = period.end;
+    final nEnd = DateTime(nStart.year, nStart.month + 1, _startDay);
+    return MonthPeriod(
+      start: nStart,
+      end: nEnd,
+      isCurrent: isInCurrentPeriod(nStart),
+    );
+  }
+
+  /// Generates the current period plus [count] previous periods (default 24 months),
+  /// with optional [futureCount] upcoming periods.
+  List<MonthPeriod> generatePeriods({int count = 24, int futureCount = 0}) {
     final current = currentMonthPeriod();
-    final periods = <MonthPeriod>[current];
+    final periods = <MonthPeriod>[];
+
+    for (int i = futureCount; i >= 1; i--) {
+      final pStart = DateTime(current.start.year, current.start.month + i, _startDay);
+      final pEnd = DateTime(pStart.year, pStart.month + 1, _startDay);
+      periods.add(MonthPeriod(
+        start: pStart,
+        end: pEnd,
+        isCurrent: false,
+      ));
+    }
+
+    periods.add(current);
 
     for (int i = 1; i <= count; i++) {
       final pStart = DateTime(current.start.year, current.start.month - i, _startDay);
@@ -174,12 +198,14 @@ class MonthPeriod {
     }
   }
 
-  /// Checks if [date] falls within [start, end] (inclusive)
+  /// Checks if [date] falls within [start, end) (start inclusive, end exclusive).
+  /// For example, period 15 Oct – 15 Nov contains dates from 15 Oct up to 14 Nov.
+  /// 15 Nov belongs to the next period (15 Nov – 15 Dec).
   bool contains(DateTime date) {
     final d = DateTime(date.year, date.month, date.day);
     final s = DateTime(start.year, start.month, start.day);
     final e = DateTime(end.year, end.month, end.day);
-    return !d.isBefore(s) && !d.isAfter(e);
+    return !d.isBefore(s) && d.isBefore(e);
   }
 
   @override

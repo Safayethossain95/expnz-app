@@ -73,6 +73,43 @@ class ExpenseSheetTable extends StatelessWidget {
                         ),
                         child: Row(
                           children: [
+                            if (provider.isMonthlyDistributionMode) ...[
+                              SizedBox(
+                                width: 22,
+                                child: Center(
+                                  child: InkWell(
+                                    borderRadius: BorderRadius.circular(11),
+                                    onTap: () => provider.selectAllMonthlyDistributionRows(),
+                                    child: Container(
+                                      width: 18,
+                                      height: 18,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: (provider.selectedMonthlyDistributionIds.isNotEmpty &&
+                                                provider.selectedMonthlyDistributionIds.containsAll(
+                                                    provider.activeExpenses.map((e) => e.id)))
+                                            ? AppColors.forestGreen
+                                            : Colors.transparent,
+                                        border: Border.all(
+                                          color: (provider.selectedMonthlyDistributionIds.isNotEmpty &&
+                                                  provider.selectedMonthlyDistributionIds.containsAll(
+                                                      provider.activeExpenses.map((e) => e.id)))
+                                              ? AppColors.forestGreen
+                                              : Colors.grey.shade400,
+                                          width: 1.5,
+                                        ),
+                                      ),
+                                      child: (provider.selectedMonthlyDistributionIds.isNotEmpty &&
+                                              provider.selectedMonthlyDistributionIds.containsAll(
+                                                  provider.activeExpenses.map((e) => e.id)))
+                                          ? const Icon(Icons.check_rounded, size: 12, color: Colors.white)
+                                          : null,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                            ],
                             SizedBox(
                               width: 24,
                               child: Text(
@@ -178,19 +215,63 @@ class ExpenseSheetTable extends StatelessWidget {
                                 ),
                                 child: Row(
                                   children: [
+                                    if (provider.isMonthlyDistributionMode) ...[
+                                      SizedBox(
+                                        width: 22,
+                                        child: Center(
+                                          child: !item.isPlaceholder
+                                              ? InkWell(
+                                                  borderRadius: BorderRadius.circular(11),
+                                                  onTap: () => provider.toggleRowSelection(item.id),
+                                                  child: Container(
+                                                    width: 18,
+                                                    height: 18,
+                                                    decoration: BoxDecoration(
+                                                      shape: BoxShape.circle,
+                                                      color: provider.isRowSelected(item.id)
+                                                          ? AppColors.forestGreen
+                                                          : Colors.transparent,
+                                                      border: Border.all(
+                                                        color: provider.isRowSelected(item.id)
+                                                            ? AppColors.forestGreen
+                                                            : Colors.grey.shade400,
+                                                        width: 1.5,
+                                                      ),
+                                                    ),
+                                                    child: provider.isRowSelected(item.id)
+                                                        ? const Icon(
+                                                            Icons.check_rounded,
+                                                            size: 12,
+                                                            color: Colors.white,
+                                                          )
+                                                        : null,
+                                                  ),
+                                                )
+                                              : const SizedBox.shrink(),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                    ],
                                     // 1. SL (Serial Number) CELL
                                     SizedBox(
                                       width: 24,
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(vertical: 4),
-                                        child: Text(
-                                          '$serialNumber',
-                                          style: TextStyle(
-                                            fontSize: 12.5,
-                                            fontWeight: FontWeight.w600,
-                                            color: item.isPlaceholder
-                                                ? AppColors.placeholderText
-                                                : AppColors.textDark,
+                                      child: InkWell(
+                                        onTap: () {
+                                          if (provider.isMonthlyDistributionMode && !item.isPlaceholder) {
+                                            provider.toggleRowSelection(item.id);
+                                          }
+                                        },
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(vertical: 4),
+                                          child: Text(
+                                            '$serialNumber',
+                                            style: TextStyle(
+                                              fontSize: 12.5,
+                                              fontWeight: FontWeight.w600,
+                                              color: item.isPlaceholder
+                                                  ? AppColors.placeholderText
+                                                  : AppColors.textDark,
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -306,8 +387,8 @@ class ExpenseSheetTable extends StatelessWidget {
                                           padding: const EdgeInsets.symmetric(vertical: 4),
                                           child: Text(
                                             item.amount > 0 && !item.isPlaceholder
-                                                ? '৳${item.amount.toStringAsFixed(2)}'
-                                                : '৳0.00',
+                                                ? formatCurrency(item.amount)
+                                                : '৳0',
                                             textAlign: TextAlign.right,
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
@@ -350,6 +431,9 @@ class ExpenseSheetTable extends StatelessWidget {
                           ),
                           child: Row(
                             children: [
+                              if (provider.isMonthlyDistributionMode) ...[
+                                const SizedBox(width: 30),
+                              ],
                               const SizedBox(
                                 width: 24,
                                 child: Icon(
@@ -384,7 +468,7 @@ class ExpenseSheetTable extends StatelessWidget {
                               SizedBox(
                                 width: 72,
                                 child: Text(
-                                  '৳${provider.totalSpent.toStringAsFixed(2)}',
+                                  formatCurrency(provider.totalSpent),
                                   textAlign: TextAlign.right,
                                   style: const TextStyle(
                                     fontSize: 13.5,

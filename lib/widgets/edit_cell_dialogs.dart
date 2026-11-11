@@ -214,7 +214,7 @@ class EditCellDialogs {
   // 4. Edit Amount (In Bangladeshi Taka ৳)
   static Future<double?> editAmount(BuildContext context, double current) async {
     final controller = TextEditingController(
-      text: current > 0 ? current.toStringAsFixed(2) : '',
+      text: current > 0 ? formatAmount(current) : '',
     );
     return showDialog<double>(
       context: context,
@@ -240,7 +240,7 @@ class EditCellDialogs {
                     fontWeight: FontWeight.bold,
                     color: AppColors.forestGreen,
                   ),
-                  hintText: '0.00',
+                  hintText: '0',
                   hintStyle: const TextStyle(color: AppColors.placeholderText),
                   filled: true,
                   fillColor: AppColors.scaffoldBg,
@@ -264,7 +264,7 @@ class EditCellDialogs {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     onPressed: () {
                       final val = double.tryParse(controller.text) ?? 0.0;
-                      controller.text = (val + quickAmt).toStringAsFixed(2);
+                      controller.text = formatAmount(val + quickAmt);
                     },
                   );
                 }).toList(),
@@ -358,7 +358,7 @@ class EditCellDialogs {
                       ),
                     ),
                     Text(
-                      '৳${item.amount.toStringAsFixed(2)}',
+                      formatCurrency(item.amount),
                       style: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w800,
