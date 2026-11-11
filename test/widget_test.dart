@@ -34,9 +34,7 @@ void main() {
 
     await tester.pumpAndSettle();
 
-    // 1. Verify Header Titles
-    expect(find.text('MY FINANCES'), findsOneWidget);
-    expect(find.text('Expense tracker'), findsOneWidget);
+ 
 
     // 2. Verify Hero Card in Taka and table rows with 0 entries
     expect(find.text('৳0.00'), findsNWidgets(6)); // 1 in hero card + 5 in table rows

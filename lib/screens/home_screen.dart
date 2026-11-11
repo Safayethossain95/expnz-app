@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:intl/intl.dart';
 import '../providers/expense_provider.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
@@ -17,8 +16,11 @@ import '../widgets/commute_review_dialog.dart';
 import '../widgets/commute_settings_dialog.dart';
 import '../widgets/top_save_indicator.dart';
 import '../services/weather_service.dart';
+import '../services/notification_service.dart';
+import '../services/month_start_service.dart';
 import '../widgets/weather_forecast_dialog.dart';
 import '../widgets/weather_tools_card.dart';
+import '../widgets/white_loading_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final ExpenseProvider provider;
@@ -59,19 +61,57 @@ class _HomeScreenState extends State<HomeScreen> {
               );
             }
           },
+          onWeatherTap: () {
+            if (mounted) {
+              WeatherForecastDialog.show(context);
+            }
+          },
         );
         await commuteService.checkAndApplyDailyCommute(provider);
         await WeatherService().checkAndApplyLocalMorningWeather();
+
+        // Handle payload if app was cold-started by a notification tap.
+        _handlePendingNotificationPayload();
       } catch (e) {
         debugPrint('Init commute / weather routine error: $e');
       }
     });
   }
 
+  /// If the app was launched by tapping a notification while terminated,
+  /// the payload is stored statically. We process it once here.
+  void _handlePendingNotificationPayload() {
+    final payload = NotificationService.pendingPayload;
+    if (payload == null || !mounted) return;
+    NotificationService.clearPendingPayload();
+
+    if (payload == kWeatherPayload) {
+      WeatherForecastDialog.show(context);
+    } else if (payload.isNotEmpty) {
+      // It's a commute batchId
+      CommuteReviewDialog.show(
+        context,
+        batchId: payload,
+        provider: provider,
+      );
+    }
+  }
+
   @override
   void dispose() {
     _scrollController.dispose();
     super.dispose();
+  }
+
+  /// Returns ordinal string for a day number: 1 → "1st", 2 → "2nd", etc.
+  String _ordinalDay(int day) {
+    if (day >= 11 && day <= 13) return '${day}th';
+    switch (day % 10) {
+      case 1: return '${day}st';
+      case 2: return '${day}nd';
+      case 3: return '${day}rd';
+      default: return '${day}th';
+    }
   }
 
   void _showBudgetDialog(BuildContext context) {
@@ -221,6 +261,18 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 ListTile(
                   contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.calendar_month_rounded, color: AppColors.forestGreen),
+                  title: const Text('Pick Month Period...'),
+                  trailing: provider.filterMode == DateFilterMode.monthPeriod
+                      ? const Icon(Icons.check_rounded, color: AppColors.forestGreen)
+                      : null,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _showMonthPickerModal(context, provider, forGeneralExpenses: true);
+                  },
+                ),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
                   leading: const Icon(Icons.event_note_rounded, color: AppColors.forestGreen),
                   title: const Text('Pick Specific Date...'),
                   trailing: provider.filterMode == DateFilterMode.customDate
@@ -248,6 +300,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final pinService = PinLockService();
     final weatherService = WeatherService();
     bool? weatherEnabledOverride;
+    int? monthStartDayOverride;
 
     showGeneralDialog(
       context: context,
@@ -262,12 +315,15 @@ class _HomeScreenState extends State<HomeScreen> {
               future: Future.wait([
                 pinService.isPinEnabled(),
                 weatherService.loadNotificationEnabled(),
+                MonthStartService().load(),
               ]),
               builder: (context, snapshot) {
                 final screenWidth = MediaQuery.sizeOf(dialogContext).width;
                 final isPinSet = snapshot.data?[0] as bool? ?? false;
                 final isWeatherEnabled = weatherEnabledOverride ??
                     (snapshot.data?[1] as bool? ?? weatherService.isNotificationEnabled);
+                final currentMonthStartDay = monthStartDayOverride ??
+                    (snapshot.data?[2] as int? ?? provider.monthStartDay);
 
                 return AlertDialog(
                   insetPadding: EdgeInsets.symmetric(
@@ -443,7 +499,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               Text(
                                 isPinSet
                                     ? 'App is protected with a 4-digit PIN lock.'
-                                    : 'Set a 4-digit PIN to lock access to your expense tracker.',
+                                    : 'Set a 4-digit PIN to lock access to your expnz.',
                                 style: const TextStyle(
                                   fontSize: 11.5,
                                   color: AppColors.textMuted,
@@ -722,6 +778,112 @@ class _HomeScreenState extends State<HomeScreen> {
                             ],
                           ),
                         ),
+                        const SizedBox(height: 14),
+
+                        // ── Month Start Day Picker ──────────────────────────
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF0F9FF),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: const Color(0xFFBAE6FD)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(
+                                    Icons.calendar_month_rounded,
+                                    size: 18,
+                                    color: Color(0xFF0369A1),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  const Expanded(
+                                    child: Text(
+                                      'Month Start Date',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                        color: AppColors.textDark,
+                                      ),
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFE0F2FE),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Text(
+                                      _ordinalDay(currentMonthStartDay),
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                        color: Color(0xFF0369A1),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                currentMonthStartDay == 1
+                                    ? 'Using calendar month (1st to last day).'
+                                    : 'This month filter: ${MonthStartService().periodLabel()}',
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  color: AppColors.textMuted,
+                                  height: 1.3,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              // Day picker chips – scrollable row
+                              SizedBox(
+                                height: 34,
+                                child: ListView.separated(
+                                  scrollDirection: Axis.horizontal,
+                                  itemCount: 28,
+                                  separatorBuilder: (_, _) => const SizedBox(width: 6),
+                                  itemBuilder: (_, i) {
+                                    final day = i + 1;
+                                    final isSelected = day == currentMonthStartDay;
+                                    return GestureDetector(
+                                      onTap: () async {
+                                        setDialogState(() {
+                                          monthStartDayOverride = day;
+                                        });
+                                        await provider.setMonthStartDay(day);
+                                      },
+                                      child: AnimatedContainer(
+                                        duration: const Duration(milliseconds: 180),
+                                        width: 34,
+                                        height: 34,
+                                        decoration: BoxDecoration(
+                                          color: isSelected
+                                              ? const Color(0xFF0369A1)
+                                              : const Color(0xFFE0F2FE),
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        alignment: Alignment.center,
+                                        child: Text(
+                                          '$day',
+                                          style: TextStyle(
+                                            fontSize: 12.5,
+                                            fontWeight: FontWeight.w700,
+                                            color: isSelected
+                                                ? Colors.white
+                                                : const Color(0xFF0369A1),
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                         const SizedBox(height: 18),
 
               if (user != null) ...[
@@ -953,6 +1115,10 @@ class _HomeScreenState extends State<HomeScreen> {
     return ListenableBuilder(
       listenable: provider,
       builder: (context, _) {
+        if (provider.isLoading) {
+          return const WhiteLoadingScreen();
+        }
+
         final isTrackerTab = provider.activeTabIndex == 0;
 
         return Scaffold(
@@ -960,11 +1126,7 @@ class _HomeScreenState extends State<HomeScreen> {
           body: SafeArea(
             child: Stack(
               children: [
-                provider.isLoading
-                    ? const Center(
-                        child: CircularProgressIndicator(color: AppColors.forestGreen),
-                      )
-                    : CustomScrollView(
+                CustomScrollView(
                     key: const PageStorageKey<String>('home_custom_scroll_view'),
                     controller: _scrollController,
                     physics: const BouncingScrollPhysics(),
@@ -989,35 +1151,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               size: 24,
                             ),
                           ),
-                          const SizedBox(width: 12),
-
-                          // Header Titles
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'MY FINANCES',
-                                  style: TextStyle(
-                                    fontSize: 10.5,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: 1.2,
-                                    color: Colors.grey.shade600,
-                                  ),
-                                ),
-                                const SizedBox(height: 1),
-                                const Text(
-                                  'Expense tracker',
-                                  style: TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.w800,
-                                    color: AppColors.textDark,
-                                    letterSpacing: -0.3,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
+                          const Spacer(),
 
                           // Calculator Quick Access Button
                           Container(
@@ -1220,10 +1354,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
                                 const SizedBox(height: 14),
 
-                                // Monthly Distribution Breakdown (shown when 'Monthly distribution' is chosen)
+                                // Pick a month button (above marked table)
                                 if (provider.filterMode == DateFilterMode.monthlyDistribution) ...[
-                                  _buildMonthlyDistributionSection(context, provider),
-                                  const SizedBox(height: 16),
+                                  _buildPickMonthButton(context, provider),
+                                  if (provider.hasSepOctMonthlyDistributionItems) ...[
+                                    const SizedBox(height: 10),
+                                    _buildMoveSepOctBanner(context, provider),
+                                  ],
+                                  const SizedBox(height: 14),
                                 ],
 
                                 // Expense Sheet Table (Columns: SL, CATEGORY, DESCRIPTION, AMOUNT)
@@ -1562,156 +1700,330 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildMonthlyDistributionSection(BuildContext context, ExpenseProvider provider) {
-    final currencyFormat = NumberFormat.currency(symbol: '৳', decimalDigits: 2);
-    final categoryMap = provider.categoryBreakdown;
-    final totalSpent = provider.totalSpent;
 
+  Widget _buildMoveSepOctBanner(BuildContext context, ExpenseProvider provider) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: AppColors.surfaceWhite,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.tableBorder),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+        color: const Color(0xFFEFF6FF),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFBFDBFE)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.sync_alt_rounded, size: 20, color: Color(0xFF1D4ED8)),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Text(
+              'Move items from 15 Sep – 15 Oct to 15 Oct – 15 Nov',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF1E3A8A),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          ElevatedButton(
+            onPressed: () async {
+              final count = await provider.moveSepOctMonthlyDistributionToOctNov();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Successfully moved $count items to 15 Oct – 15 Nov!'),
+                    backgroundColor: AppColors.forestGreen,
+                  ),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.forestGreen,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text('Move Now', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
           ),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: BoxDecoration(
-                      color: AppColors.mintBadgeBg,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: const Icon(
-                      Icons.pie_chart_outline_rounded,
-                      size: 18,
-                      color: AppColors.forestGreen,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  const Text(
-                    'Monthly Distribution',
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textDark,
-                    ),
-                  ),
-                ],
+    );
+  }
+
+  Widget _buildPickMonthButton(BuildContext context, ExpenseProvider provider) {
+    final selectedPeriod = provider.selectedMonthlyDistributionPeriod;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => _showMonthPickerModal(context, provider),
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: AppColors.surfaceWhite,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: AppColors.tableBorder,
+              width: 1.2,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.02),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
               ),
-              InkWell(
-                borderRadius: BorderRadius.circular(8),
-                onTap: () => provider.setActiveTab(1),
-                child: const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(7),
+                decoration: BoxDecoration(
+                  color: AppColors.mintBadgeBg,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(
+                  Icons.calendar_month_rounded,
+                  size: 18,
+                  color: AppColors.forestGreen,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Pick a month',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textMuted,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            selectedPeriod.label,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.textDark,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (selectedPeriod.isCurrent) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppColors.forestGreen.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Text(
+                              'Current',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.forestGreen,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(
+                Icons.keyboard_arrow_down_rounded,
+                size: 22,
+                color: AppColors.forestGreen,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showMonthPickerModal(
+    BuildContext context,
+    ExpenseProvider provider, {
+    bool forGeneralExpenses = false,
+  }) {
+    final periods = provider.availableMonthPeriods;
+    final selectedPeriod = forGeneralExpenses
+        ? (provider.selectedExpenseMonthPeriod ?? provider.currentMonthPeriod)
+        : provider.selectedMonthlyDistributionPeriod;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surfaceWhite,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.6,
+          minChildSize: 0.35,
+          maxChildSize: 0.85,
+          expand: false,
+          builder: (sheetCtx, scrollController) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 12),
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
                   child: Row(
                     children: [
-                      Text(
-                        'Tools',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
+                      Container(
+                        padding: const EdgeInsets.all(7),
+                        decoration: BoxDecoration(
+                          color: AppColors.mintBadgeBg,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(
+                          Icons.date_range_rounded,
+                          size: 20,
                           color: AppColors.forestGreen,
                         ),
                       ),
-                      Icon(
-                        Icons.arrow_forward_ios_rounded,
-                        size: 11,
-                        color: AppColors.forestGreen,
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Select Month',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.textDark,
+                              ),
+                            ),
+                            Text(
+                              'Cycle starts on the ${_ordinalDay(provider.monthStartDay)} of each month',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: AppColors.textMuted,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          if (categoryMap.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 8),
-              child: Center(
-                child: Text(
-                  'No expenses recorded for this month yet.',
-                  style: TextStyle(fontSize: 12.5, color: AppColors.textMuted),
-                ),
-              ),
-            )
-          else
-            ...categoryMap.entries.map((entry) {
-              final cat = entry.key;
-              final amt = entry.value;
-              final percentage = totalSpent > 0 ? (amt / totalSpent) : 0.0;
+                const Divider(height: 1, color: AppColors.tableBorder),
+                Expanded(
+                  child: ListView.separated(
+                    controller: scrollController,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    itemCount: periods.length,
+                    separatorBuilder: (_, _) => const Divider(
+                      height: 1,
+                      indent: 48,
+                      color: Color(0xFFF1F5F9),
+                    ),
+                    itemBuilder: (itemCtx, index) {
+                      final period = periods[index];
+                      final isSelected = period == selectedPeriod;
 
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 5),
-                child: Column(
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                      return ListTile(
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        tileColor: isSelected
+                            ? AppColors.forestGreen.withValues(alpha: 0.06)
+                            : Colors.transparent,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 2,
+                        ),
+                        leading: Container(
+                          padding: const EdgeInsets.all(6),
                           decoration: BoxDecoration(
-                            color: cat.bgColor,
-                            borderRadius: BorderRadius.circular(6),
+                            color: isSelected
+                                ? AppColors.forestGreen
+                                : const Color(0xFFF1F5F9),
+                            shape: BoxShape.circle,
                           ),
-                          child: Text(
-                            cat.label,
-                            style: TextStyle(
-                              color: cat.textColor,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        const Spacer(),
-                        Text(
-                          currencyFormat.format(amt),
-                          style: const TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.textDark,
+                          child: Icon(
+                            isSelected
+                                ? Icons.check_rounded
+                                : Icons.calendar_today_outlined,
+                            size: 15,
+                            color: isSelected ? Colors.white : AppColors.textMuted,
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        Text(
-                          '${(percentage * 100).toStringAsFixed(0)}%',
-                          style: const TextStyle(
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.textMuted,
+                        title: Text(
+                          period.label,
+                          style: TextStyle(
+                            fontSize: 14.5,
+                            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                            color: isSelected ? AppColors.forestGreen : AppColors.textDark,
                           ),
                         ),
-                      ],
-                    ),
-                    const SizedBox(height: 5),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(3),
-                      child: LinearProgressIndicator(
-                        value: percentage,
-                        minHeight: 5,
-                        backgroundColor: Colors.grey.shade100,
-                        valueColor: AlwaysStoppedAnimation<Color>(cat.textColor),
-                      ),
-                    ),
-                  ],
+                        trailing: period.isCurrent
+                            ? Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 3,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppColors.mintBadgeBg,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: AppColors.forestGreen.withValues(alpha: 0.3),
+                                  ),
+                                ),
+                                child: const Text(
+                                  'Current',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.forestGreen,
+                                  ),
+                                ),
+                              )
+                            : null,
+                        onTap: () {
+                          if (forGeneralExpenses) {
+                            provider.setMonthPeriodFilter(period);
+                          } else {
+                            provider.setSelectedMonthlyDistributionPeriod(period);
+                          }
+                          Navigator.pop(ctx);
+                        },
+                      );
+                    },
+                  ),
                 ),
-              );
-            }),
-        ],
-      ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 }

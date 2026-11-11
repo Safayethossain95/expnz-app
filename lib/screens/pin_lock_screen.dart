@@ -3,6 +3,7 @@ import '../services/pin_lock_service.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/pin_keypad.dart';
+import '../widgets/white_loading_screen.dart';
 
 class PinLockScreen extends StatefulWidget {
   final VoidCallback onUnlocked;
@@ -26,6 +27,7 @@ class _PinLockScreenState extends State<PinLockScreen>
   String _inputPin = '';
   String? _errorMessage;
   bool _hasError = false;
+  bool _isUnlocked = false;
 
   late final AnimationController _shakeController;
   late final Animation<double> _shakeAnimation;
@@ -103,6 +105,11 @@ class _PinLockScreenState extends State<PinLockScreen>
   Future<void> _verifyPin(String pin) async {
     final isValid = await _pinService.verifyPin(pin);
     if (isValid) {
+      if (mounted) {
+        setState(() {
+          _isUnlocked = true;
+        });
+      }
       widget.onUnlocked();
     } else {
       _triggerError('Incorrect PIN. Try again.');
@@ -150,6 +157,10 @@ class _PinLockScreenState extends State<PinLockScreen>
 
   @override
   Widget build(BuildContext context) {
+    if (_isUnlocked) {
+      return const WhiteLoadingScreen();
+    }
+
     final currentUser = _authService.currentUser;
 
     return Scaffold(

@@ -12,28 +12,60 @@ class WeatherToolsCard extends StatefulWidget {
 
 class _WeatherToolsCardState extends State<WeatherToolsCard> {
   final WeatherService _weatherService = WeatherService();
-  bool _isLoading = true;
+  late bool _isLoading;
   WeatherSummary? _summary;
   bool _isNotificationEnabled = true;
   int? _currentTemp;
-  String _currentCondition = 'Loading...';
+  String _currentCondition = 'Fair';
 
   @override
   void initState() {
     super.initState();
+    // If today's weather is already stored in memory or local storage,
+    // display it immediately without any loading spinner!
+    if (_weatherService.hasWeatherForToday) {
+      _isLoading = false;
+      _summary = _weatherService.cachedSummary;
+      _currentTemp = _weatherService.cachedCurrentTemp;
+      _currentCondition = _weatherService.cachedCurrentCondition ?? 'Fair';
+      _isNotificationEnabled = _weatherService.isNotificationEnabled;
+    } else {
+      _isLoading = true;
+    }
     _loadWeatherData();
   }
 
-  Future<void> _loadWeatherData() async {
-    setState(() => _isLoading = true);
+  Future<void> _loadWeatherData({bool forceRefresh = false}) async {
+    // If not a force-refresh, check local storage and never load from network if stored today!
+    if (!forceRefresh) {
+      if (!_weatherService.hasWeatherForToday) {
+        await _weatherService.initFromLocalStorage();
+      }
+      if (_weatherService.hasWeatherForToday) {
+        if (mounted) {
+          setState(() {
+            _isNotificationEnabled = _weatherService.isNotificationEnabled;
+            _summary = _weatherService.cachedSummary;
+            _currentTemp = _weatherService.cachedCurrentTemp;
+            _currentCondition = _weatherService.cachedCurrentCondition ?? 'Fair';
+            _isLoading = false;
+          });
+        }
+        return; // Stored in local storage! Do not load again for the whole day!
+      }
+    }
+
+    if (mounted) setState(() => _isLoading = true);
     try {
       final isEnabled = await _weatherService.loadNotificationEnabled();
-      final hours = await _weatherService.fetchHourlyForecast();
+      if (forceRefresh) await _weatherService.clearCache();
+      final hours = await _weatherService.getCachedOrFetchForecast(forceRefresh: forceRefresh);
       final summary = _weatherService.generateSummary(hours);
 
-      int? currentTemp;
-      String currentCond = 'Fair';
-      if (hours.isNotEmpty) {
+      int? currentTemp = _weatherService.cachedCurrentTemp;
+      String currentCond = _weatherService.cachedCurrentCondition ?? 'Fair';
+
+      if (currentTemp == null && hours.isNotEmpty) {
         final firstHour = hours.first;
         final tempMap = firstHour['temperature'] as Map<String, dynamic>?;
         currentTemp = (tempMap?['degrees'] as num?)?.round();
@@ -176,7 +208,7 @@ class _WeatherToolsCardState extends State<WeatherToolsCard> {
                       icon: const Icon(Icons.refresh_rounded, size: 20),
                       color: AppColors.textMuted,
                       tooltip: 'Refresh Weather',
-                      onPressed: _loadWeatherData,
+                      onPressed: () => _loadWeatherData(forceRefresh: true),
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                     ),

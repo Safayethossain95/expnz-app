@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'notification_service.dart';
@@ -35,31 +36,51 @@ class WeatherService {
   static const double defaultLatitude = 23.8103; // Dhaka
   static const double defaultLongitude = 90.4125;
 
-  static const String _prefKeyLastWeatherDate = 'expnz_last_weather_date_v1';
   static const String _prefKeyWeatherEnabled = 'expnz_weather_enabled_v1';
+  static const String _prefKeyWeatherCacheDate = 'expnz_weather_cache_date_v1';
+  static const String _prefKeyWeatherCacheData = 'expnz_weather_cache_data_v1';
+
+  // In-memory cache across widget rebuilds and session
+  static List<Map<String, dynamic>>? _sessionCache;
+  static WeatherSummary? _sessionSummary;
+  static int? _sessionCurrentTemp;
+  static String? _sessionCurrentCondition;
+  static String? _sessionCacheDate;
+
+  bool get hasWeatherForToday =>
+      _sessionCacheDate == _todayStr() && _sessionSummary != null;
+
+  WeatherSummary? get cachedSummary =>
+      _sessionCacheDate == _todayStr() ? _sessionSummary : null;
+  int? get cachedCurrentTemp =>
+      _sessionCacheDate == _todayStr() ? _sessionCurrentTemp : null;
+  String? get cachedCurrentCondition =>
+      _sessionCacheDate == _todayStr() ? _sessionCurrentCondition : null;
 
   bool _isNotificationEnabled = true;
   bool get isNotificationEnabled => _isNotificationEnabled;
 
-  /// Loads notification preference from local storage and Cloud Firestore
-  Future<bool> loadNotificationEnabled() async {
-    final prefs = await SharedPreferences.getInstance();
-    _isNotificationEnabled = prefs.getBool(_prefKeyWeatherEnabled) ?? true;
-
+  /// Loads notification preference from local storage and optionally syncs with Cloud Firestore
+  Future<bool> loadNotificationEnabled({bool syncWithCloud = false}) async {
     try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user != null) {
-        final doc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .collection('settings')
-            .doc('weather_automation')
-            .get();
-        if (doc.exists && doc.data() != null) {
-          final cloudEnabled = doc.data()!['enabled'] as bool?;
-          if (cloudEnabled != null) {
-            _isNotificationEnabled = cloudEnabled;
-            await prefs.setBool(_prefKeyWeatherEnabled, cloudEnabled);
+      final prefs = await SharedPreferences.getInstance();
+      _isNotificationEnabled = prefs.getBool(_prefKeyWeatherEnabled) ?? true;
+
+      if (syncWithCloud && Firebase.apps.isNotEmpty) {
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
+          final doc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .collection('settings')
+              .doc('weather_automation')
+              .get();
+          if (doc.exists && doc.data() != null) {
+            final cloudEnabled = doc.data()!['enabled'] as bool?;
+            if (cloudEnabled != null) {
+              _isNotificationEnabled = cloudEnabled;
+              await prefs.setBool(_prefKeyWeatherEnabled, cloudEnabled);
+            }
           }
         }
       }
@@ -76,21 +97,23 @@ class WeatherService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_prefKeyWeatherEnabled, enabled);
 
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user != null) {
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .collection('settings')
-            .doc('weather_automation')
-            .set({
-          'enabled': enabled,
-          'updatedAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
+    if (Firebase.apps.isNotEmpty) {
+      try {
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .collection('settings')
+              .doc('weather_automation')
+              .set({
+            'enabled': enabled,
+            'updatedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+        }
+      } catch (e) {
+        debugPrint('Error saving cloud weather settings: $e');
       }
-    } catch (e) {
-      debugPrint('Error saving cloud weather settings: $e');
     }
   }
 
@@ -104,7 +127,153 @@ class WeatherService {
     return '$hour12:00 $period';
   }
 
-  /// Fetches 24-hour hourly weather forecast from Google Maps Weather API
+  /// Preloads today's weather from local storage (SharedPreferences) into memory.
+  /// Called at app launch so the Tools page renders instantly without loading.
+  Future<bool> initFromLocalStorage() async {
+    final todayStr = _todayStr();
+
+    if (_sessionCacheDate == todayStr && _sessionSummary != null) {
+      return true;
+    }
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _isNotificationEnabled = prefs.getBool(_prefKeyWeatherEnabled) ?? true;
+
+      final cachedDate = prefs.getString(_prefKeyWeatherCacheDate);
+      if (cachedDate == todayStr) {
+        final cachedJson = prefs.getString(_prefKeyWeatherCacheData);
+        if (cachedJson != null && cachedJson.isNotEmpty) {
+          final decoded = (jsonDecode(cachedJson) as List<dynamic>)
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList();
+          if (decoded.isNotEmpty) {
+            _sessionCache = decoded;
+            _sessionCacheDate = todayStr;
+            _sessionSummary = generateSummary(decoded);
+            _extractCurrentMetrics(decoded, _sessionSummary!);
+            debugPrint('WeatherService: preloaded weather from local storage for $todayStr');
+            return true;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('WeatherService error preloading from local storage: $e');
+    }
+
+    return false;
+  }
+
+  /// Alias for initFromLocalStorage
+  Future<bool> loadFromLocalStorage() => initFromLocalStorage();
+
+  /// Returns the cached forecast from local storage if it was already fetched today;
+  /// otherwise fetches once from the API, stores it in local storage, and returns it.
+  /// Does NOT hit the network again for the whole day unless [forceRefresh] is true.
+  Future<List<Map<String, dynamic>>> getCachedOrFetchForecast({
+    double lat = defaultLatitude,
+    double lng = defaultLongitude,
+    bool forceRefresh = false,
+  }) async {
+    final todayStr = _todayStr();
+
+    // 1. In-memory session cache hit
+    if (!forceRefresh && _sessionCacheDate == todayStr && _sessionCache != null && _sessionCache!.isNotEmpty) {
+      debugPrint('WeatherService: returning in-memory session cache for $todayStr');
+      return _sessionCache!;
+    }
+
+    // 2. SharedPreferences local storage hit (don't load from network for the whole day)
+    if (!forceRefresh) {
+      final prefs = await SharedPreferences.getInstance();
+      final cachedDate = prefs.getString(_prefKeyWeatherCacheDate);
+      if (cachedDate == todayStr) {
+        final cachedJson = prefs.getString(_prefKeyWeatherCacheData);
+        if (cachedJson != null && cachedJson.isNotEmpty) {
+          try {
+            final decoded = (jsonDecode(cachedJson) as List<dynamic>)
+                .map((e) => Map<String, dynamic>.from(e as Map))
+                .toList();
+            if (decoded.isNotEmpty) {
+              _sessionCache = decoded;
+              _sessionCacheDate = todayStr;
+              _sessionSummary = generateSummary(decoded);
+              _extractCurrentMetrics(decoded, _sessionSummary!);
+              debugPrint('WeatherService: returning SharedPreferences local storage cache for $todayStr (no API call)');
+              return decoded;
+            }
+          } catch (_) {}
+        }
+      }
+    }
+
+    // 3. Fetch from network only if forceRefresh is true or no data stored for today
+    final fresh = await fetchHourlyForecast(lat: lat, lng: lng);
+    if (fresh.isNotEmpty) {
+      _sessionCache = fresh;
+      _sessionCacheDate = todayStr;
+      _sessionSummary = generateSummary(fresh);
+      _extractCurrentMetrics(fresh, _sessionSummary!);
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(_prefKeyWeatherCacheDate, todayStr);
+        await prefs.setString(_prefKeyWeatherCacheData, jsonEncode(fresh));
+        debugPrint('WeatherService: fetched & stored in local storage for $todayStr');
+      } catch (e) {
+        debugPrint('WeatherService cache write error: $e');
+      }
+    }
+    return fresh;
+  }
+
+  void _extractCurrentMetrics(List<Map<String, dynamic>> hours, WeatherSummary summary) {
+    int? currentTemp;
+    String currentCond = 'Fair';
+    if (hours.isNotEmpty) {
+      final firstHour = hours.first;
+      final tempMap = firstHour['temperature'] as Map<String, dynamic>?;
+      currentTemp = (tempMap?['degrees'] as num?)?.round();
+      final condMap = firstHour['weatherCondition'] as Map<String, dynamic>?;
+      final descMap = condMap?['description'] as Map<String, dynamic>?;
+      currentCond = (descMap?['text'] as String?) ?? 'Fair';
+    }
+    _sessionCurrentTemp = currentTemp ?? summary.maxTemp;
+    _sessionCurrentCondition = currentCond;
+  }
+
+  /// Clears in-memory session variables (e.g. for testing or fresh reload from storage).
+  void resetSessionMemory() {
+    _sessionCache = null;
+    _sessionSummary = null;
+    _sessionCurrentTemp = null;
+    _sessionCurrentCondition = null;
+    _sessionCacheDate = null;
+  }
+
+  /// Alias for resetSessionMemory
+  void clearSessionCache() => resetSessionMemory();
+
+  /// Clears local + session weather cache (e.g. when user force-refreshes).
+  Future<void> clearCache() async {
+    _sessionCache = null;
+    _sessionSummary = null;
+    _sessionCurrentTemp = null;
+    _sessionCurrentCondition = null;
+    _sessionCacheDate = null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_prefKeyWeatherCacheDate);
+      await prefs.remove(_prefKeyWeatherCacheData);
+    } catch (_) {}
+  }
+
+  String _todayStr() {
+    final now = DateTime.now();
+    return '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+  }
+
+  /// Fetches 24-hour hourly weather forecast from Google Maps Weather API.
+  /// Prefer [getCachedOrFetchForecast] for normal use.
   Future<List<Map<String, dynamic>>> fetchHourlyForecast({
     double lat = defaultLatitude,
     double lng = defaultLongitude,
@@ -213,7 +382,7 @@ class WeatherService {
         : '';
     final tempSummary = '🌡️ $minTemp°C - $maxTemp°C$peakText.';
 
-    const title = "⛅ Today's Weather (9 AM Forecast)";
+    const title = "⛅ Today's Weather";
     final body = '$rainSummary $tempSummary';
 
     return WeatherSummary(
@@ -243,31 +412,70 @@ class WeatherService {
     return summary;
   }
 
-  /// Checks if 9:00 AM notification should be delivered today locally (failsafe if FCM is missed)
+  /// Ensures weather is loaded once for the day, stored in local storage,
+  /// and the 9:00 AM weather notification is scheduled.
   Future<bool> checkAndApplyLocalMorningWeather() async {
     final isEnabled = await loadNotificationEnabled();
     if (!isEnabled) {
-      return false; // User toggled weather notifications off
+      // Cancel any existing scheduled notification.
+      await NotificationService().cancelNotification(2001);
+      return false;
     }
 
-    final now = DateTime.now();
-    final todayStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    final todayStr = _todayStr();
 
+    // 1. Check local storage: load it once and store in local storage if not already present
+    List<Map<String, dynamic>> hours = [];
     final prefs = await SharedPreferences.getInstance();
-    final lastSentDate = prefs.getString(_prefKeyLastWeatherDate);
+    final cachedDate = prefs.getString(_prefKeyWeatherCacheDate);
 
-    if (lastSentDate == todayStr) {
-      return false; // Already sent today
+    if (cachedDate == todayStr) {
+      final cachedJson = prefs.getString(_prefKeyWeatherCacheData);
+      if (cachedJson != null && cachedJson.isNotEmpty) {
+        try {
+          hours = (jsonDecode(cachedJson) as List<dynamic>)
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList();
+          if (hours.isNotEmpty) {
+            _sessionCache = hours;
+            _sessionCacheDate = todayStr;
+            _sessionSummary = generateSummary(hours);
+            _extractCurrentMetrics(hours, _sessionSummary!);
+            debugPrint('WeatherService: morning check found existing local storage for $todayStr');
+          }
+        } catch (_) {}
+      }
     }
 
-    // Only fire if current time has passed 9:00 AM
-    final nineAm = DateTime(now.year, now.month, now.day, 9, 0);
-    if (now.isAfter(nineAm)) {
-      await prefs.setString(_prefKeyLastWeatherDate, todayStr);
-      await triggerImmediateWeatherNotification();
-      return true;
+    // If not stored in local storage yet today, load once from API and store for the whole day
+    if (hours.isEmpty) {
+      hours = await fetchHourlyForecast();
+      if (hours.isNotEmpty) {
+        _sessionCache = hours;
+        _sessionCacheDate = todayStr;
+        _sessionSummary = generateSummary(hours);
+        _extractCurrentMetrics(hours, _sessionSummary!);
+        try {
+          await prefs.setString(_prefKeyWeatherCacheDate, todayStr);
+          await prefs.setString(_prefKeyWeatherCacheData, jsonEncode(hours));
+          debugPrint('WeatherService: morning check fetched & saved to local storage for $todayStr');
+        } catch (e) {
+          debugPrint('WeatherService morning cache error: $e');
+        }
+      }
     }
 
-    return false;
+    // 2. Schedule the 9 AM weather notification with today's summary
+    final summary = _sessionSummary ?? generateSummary(hours);
+    await NotificationService().scheduleWeatherNotification(
+      hour: 9,
+      minute: 0,
+      title: summary.title,
+      body: summary.body.isNotEmpty
+          ? summary.body
+          : 'Morning weather forecast is ready. Tap to view.',
+    );
+
+    return true;
   }
 }

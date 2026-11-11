@@ -374,7 +374,7 @@ function formatWeatherSummary(hours) {
   const peakText = peakHour !== null ? ` (Peak ${maxTemp}°C at ${formatTime(peakHour)})` : "";
   const tempSummary = `🌡️ ${minTemp}°C - ${maxTemp}°C${peakText}.`;
 
-  const title = "⛅ Today's Weather (9 AM Forecast)";
+  const title = "⛅ Today's Weather";
   const body = `${rainSummary} ${tempSummary}`;
 
   return {

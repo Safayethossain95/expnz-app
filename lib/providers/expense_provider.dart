@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/expense_model.dart';
 import '../services/expense_repository.dart';
+import '../services/month_start_service.dart';
 
 enum DateFilterMode {
   allTime('All time'),
   today('Today'),
   thisMonth('This month'),
+  monthPeriod('Pick month'),
   monthlyDistribution('Monthly distribution'),
   customDate('Specific date');
 
@@ -16,12 +18,15 @@ enum DateFilterMode {
 
 class ExpenseProvider extends ChangeNotifier {
   final ExpenseRepository _repository = ExpenseRepository();
+  final MonthStartService _monthStartService = MonthStartService();
 
   List<ExpenseItem> _expenses = [];
   List<ExpenseItem> _monthlyDistributionExpenses = [];
   double _monthlyBudget = ExpenseRepository.defaultMonthlyBudget;
   DateFilterMode _filterMode = DateFilterMode.thisMonth;
   DateTime? _customSelectedDate;
+  MonthPeriod? _selectedMonthlyDistributionPeriod;
+  MonthPeriod? _selectedExpenseMonthPeriod;
   int _activeTabIndex = 0; // 0 = Tracker, 1 = Insights
   DateTime _lastSavedAt = DateTime.now();
   bool _isLoading = true;
@@ -41,10 +46,39 @@ class ExpenseProvider extends ChangeNotifier {
   DateTime get lastSavedAt => _lastSavedAt;
   int get visibleLimit => tableRows.length;
   bool get isMonthlyDistributionMode => _filterMode == DateFilterMode.monthlyDistribution;
+  int get monthStartDay => _monthStartService.startDay;
+
+  MonthPeriod get currentMonthPeriod => _monthStartService.currentMonthPeriod();
+
+  MonthPeriod get selectedMonthlyDistributionPeriod =>
+      _selectedMonthlyDistributionPeriod ?? currentMonthPeriod;
+
+  MonthPeriod? get selectedExpenseMonthPeriod => _selectedExpenseMonthPeriod;
+
+  List<MonthPeriod> get availableMonthPeriods => _monthStartService.generatePeriods();
+
+  void setSelectedMonthlyDistributionPeriod(MonthPeriod period) {
+    _selectedMonthlyDistributionPeriod = period;
+    _extraEmptyRows = 2;
+    notifyListeners();
+  }
+
+  void setMonthPeriodFilter(MonthPeriod period) {
+    _filterMode = DateFilterMode.monthPeriod;
+    _selectedExpenseMonthPeriod = period;
+    _extraEmptyRows = 2;
+    notifyListeners();
+  }
 
   DateTime get currentEffectiveDate {
     if (_filterMode == DateFilterMode.customDate && _customSelectedDate != null) {
       return _customSelectedDate!;
+    }
+    if (_filterMode == DateFilterMode.monthPeriod && _selectedExpenseMonthPeriod != null) {
+      return _selectedExpenseMonthPeriod!.start;
+    }
+    if (_filterMode == DateFilterMode.monthlyDistribution) {
+      return selectedMonthlyDistributionPeriod.start;
     }
     return DateTime.now();
   }
@@ -56,7 +90,12 @@ class ExpenseProvider extends ChangeNotifier {
       case DateFilterMode.today:
         return 'Today';
       case DateFilterMode.thisMonth:
-        return DateFormat('MMMM yyyy').format(DateTime.now());
+        if (_monthStartService.startDay == 1) {
+          return DateFormat('MMMM yyyy').format(DateTime.now());
+        }
+        return _monthStartService.periodLabel();
+      case DateFilterMode.monthPeriod:
+        return _selectedExpenseMonthPeriod?.label ?? 'Month period';
       case DateFilterMode.monthlyDistribution:
         return 'Monthly distribution';
       case DateFilterMode.customDate:
@@ -92,6 +131,8 @@ class ExpenseProvider extends ChangeNotifier {
     _isLoading = true;
     notifyListeners();
 
+    await _monthStartService.load();
+
     final loadedExpenses = await _repository.loadExpenses();
     _expenses = loadedExpenses
         .where((e) => !e.isPlaceholder && (e.amount > 0 || e.description.isNotEmpty || e.category != null))
@@ -101,6 +142,11 @@ class ExpenseProvider extends ChangeNotifier {
     _monthlyDistributionExpenses = loadedMonthly
         .where((e) => !e.isPlaceholder && (e.amount > 0 || e.description.isNotEmpty || e.category != null))
         .toList();
+
+    // Check and automatically move 15 Sep - 15 Oct items to 15 Oct - 15 Nov if needed
+    if (hasSepOctMonthlyDistributionItems) {
+      await moveSepOctMonthlyDistributionToOctNov();
+    }
 
     _monthlyBudget = await _repository.loadBudget();
     _extraEmptyRows = 2;
@@ -137,7 +183,10 @@ class ExpenseProvider extends ChangeNotifier {
             item.date!.month == now.month &&
             item.date!.day == now.day;
       case DateFilterMode.thisMonth:
-        return item.date!.year == now.year && item.date!.month == now.month;
+        return _monthStartService.isInCurrentPeriod(item.date!);
+      case DateFilterMode.monthPeriod:
+        if (_selectedExpenseMonthPeriod == null) return true;
+        return _selectedExpenseMonthPeriod!.contains(item.date!);
       case DateFilterMode.monthlyDistribution:
         return true;
       case DateFilterMode.customDate:
@@ -151,8 +200,12 @@ class ExpenseProvider extends ChangeNotifier {
   // Active recorded expenses matching current filter
   List<ExpenseItem> get activeExpenses {
     if (isMonthlyDistributionMode) {
+      final period = selectedMonthlyDistributionPeriod;
       return _monthlyDistributionExpenses
-          .where((e) => !e.isPlaceholder && (e.amount > 0 || e.description.isNotEmpty || e.category != null))
+          .where((e) =>
+              !e.isPlaceholder &&
+              (e.amount > 0 || e.description.isNotEmpty || e.category != null) &&
+              (e.date == null ? period.isCurrent : period.contains(e.date!)))
           .toList();
     }
     return _expenses
@@ -163,9 +216,7 @@ class ExpenseProvider extends ChangeNotifier {
   // Rows displayed in the table: all recorded entries + exactly 2 extra empty rows (plus any added via '+')
   List<ExpenseItem> get tableRows {
     final realList = isMonthlyDistributionMode
-        ? _monthlyDistributionExpenses
-            .where((e) => !e.isPlaceholder && (e.amount > 0 || e.description.isNotEmpty || e.category != null))
-            .toList()
+        ? activeExpenses
         : _expenses
             .where((e) => !e.isPlaceholder && (e.amount > 0 || e.description.isNotEmpty || e.category != null) && _matchesDateFilter(e))
             .toList();
@@ -278,7 +329,7 @@ class ExpenseProvider extends ChangeNotifier {
 
       final current = _monthlyDistributionExpenses[index];
       final updated = current.copyWith(
-        date: date ?? current.date ?? DateTime.now(),
+        date: date ?? current.date ?? currentEffectiveDate,
         category: category,
         clearCategory: clearCategory,
         description: description ?? current.description,
@@ -373,10 +424,82 @@ class ExpenseProvider extends ChangeNotifier {
     await _repository.saveBudget(newBudget);
   }
 
+  /// Updates the month start day and re-filters the current view.
+  Future<void> setMonthStartDay(int day) async {
+    await _monthStartService.save(day);
+    _selectedMonthlyDistributionPeriod = null;
+    _selectedExpenseMonthPeriod = null;
+    notifyListeners(); // re-evaluate filtered list
+  }
+
+  /// Returns true if there are monthly distribution items falling in 15 Sep - 15 Oct
+  bool get hasSepOctMonthlyDistributionItems {
+    final sep15 = DateTime(2026, 9, 15);
+    final oct15 = DateTime(2026, 10, 15);
+    return _monthlyDistributionExpenses.any((e) {
+      if (e.isPlaceholder) return false;
+      if (e.date == null) return true;
+      final d = DateTime(e.date!.year, e.date!.month, e.date!.day);
+      return !d.isBefore(sep15) && !d.isAfter(oct15);
+    });
+  }
+
+  /// Moves monthly distribution items from 15 Sep - 15 Oct to 15 Oct - 15 Nov and saves to DB.
+  Future<int> moveSepOctMonthlyDistributionToOctNov() async {
+    int movedCount = 0;
+    final sep15 = DateTime(2026, 9, 15);
+    final oct15 = DateTime(2026, 10, 15);
+
+    final updatedList = <ExpenseItem>[];
+    for (final item in _monthlyDistributionExpenses) {
+      if (item.date != null) {
+        final d = DateTime(item.date!.year, item.date!.month, item.date!.day);
+        // If the date falls within 15 Sep - 15 Oct (inclusive)
+        if (!d.isBefore(sep15) && !d.isAfter(oct15)) {
+          // Advance month by 1 to place it in 15 Oct - 15 Nov
+          final newYear = item.date!.month == 12 ? item.date!.year + 1 : item.date!.year;
+          final newMonth = item.date!.month == 12 ? 1 : item.date!.month + 1;
+          final maxDays = DateTime(newYear, newMonth + 1, 0).day;
+          final newDay = item.date!.day.clamp(1, maxDays);
+
+          final movedDate = DateTime(
+            newYear,
+            newMonth,
+            newDay,
+            item.date!.hour,
+            item.date!.minute,
+            item.date!.second,
+          );
+
+          updatedList.add(item.copyWith(date: movedDate));
+          movedCount++;
+        } else {
+          updatedList.add(item);
+        }
+      } else {
+        // If date is null, place it in the current 15 Oct - 15 Nov period
+        updatedList.add(item.copyWith(date: DateTime(2026, 10, 15)));
+        movedCount++;
+      }
+    }
+
+    if (movedCount > 0) {
+      _monthlyDistributionExpenses = updatedList;
+      _lastSavedAt = DateTime.now();
+      notifyListeners();
+      await _repository.saveMonthlyDistributionExpenses(_monthlyDistributionExpenses);
+      debugPrint('Successfully moved $movedCount monthly distribution items from 15 Sep - 15 Oct to 15 Oct - 15 Nov');
+    }
+
+    return movedCount;
+  }
+
   Future<void> resetToBlank() async {
     _extraEmptyRows = 2;
     if (isMonthlyDistributionMode) {
-      _monthlyDistributionExpenses = [];
+      final period = selectedMonthlyDistributionPeriod;
+      _monthlyDistributionExpenses.removeWhere((e) =>
+          e.date == null ? period.isCurrent : period.contains(e.date!));
       _lastSavedAt = DateTime.now();
       notifyListeners();
       await _repository.saveMonthlyDistributionExpenses(_monthlyDistributionExpenses);

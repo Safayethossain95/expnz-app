@@ -11,6 +11,7 @@ import '../models/expense_model.dart';
 import '../providers/expense_provider.dart';
 
 import 'notification_service.dart';
+import 'weather_service.dart';
 
 class CommuteAutomationService {
   static final CommuteAutomationService _instance =
@@ -27,13 +28,23 @@ class CommuteAutomationService {
   CommuteConfig get config => _config;
 
   Function(String batchId)? onReviewRequested;
+  VoidCallback? onWeatherTapped;
 
-  Future<void> init({Function(String batchId)? onReview}) async {
+  Future<void> init({
+    Function(String batchId)? onReview,
+    VoidCallback? onWeatherTap,
+  }) async {
     onReviewRequested = onReview;
+    onWeatherTapped = onWeatherTap;
     await loadConfig();
-    await NotificationService().init(onTapped: (batchId) {
-      onReviewRequested?.call(batchId);
-    });
+    await NotificationService().init(
+      onCommuteTap: (batchId) {
+        onReviewRequested?.call(batchId);
+      },
+      onWeatherTap: () {
+        onWeatherTapped?.call();
+      },
+    );
     await _initFirebaseMessaging();
   }
 
@@ -78,10 +89,15 @@ class CommuteAutomationService {
         debugPrint('Foreground FCM message received: ${message.notification?.title}');
         final data = message.data;
         if (data['type'] == 'weather') {
-          NotificationService().showWeatherNotification(
-            title: message.notification?.title ?? "Today's Weather Forecast",
-            body: message.notification?.body ?? 'Hourly weather update available.',
-          );
+          // Load it once on morning notification and store it in local storage!
+          final weatherService = WeatherService();
+          weatherService.getCachedOrFetchForecast().then((hours) {
+            final summary = weatherService.cachedSummary ?? weatherService.generateSummary(hours);
+            NotificationService().showWeatherNotification(
+              title: summary.title.isNotEmpty ? summary.title : (message.notification?.title ?? "⛅ Today's Weather"),
+              body: summary.body.isNotEmpty ? summary.body : (message.notification?.body ?? 'Hourly weather update available.'),
+            );
+          });
           return;
         }
 
@@ -185,20 +201,15 @@ class CommuteAutomationService {
 
     // If today is already inserted, skip insertion
     if (_config.lastInsertedDate == todayStr) {
-      // Check if there is still an unreviewed pending batch
+      // If there's still an unreviewed batch, re-schedule the notification
+      // (do NOT auto-open the popup — user will tap the notification).
       if (_config.pendingReviewBatchId != null &&
           _config.pendingReviewBatchId!.isNotEmpty) {
-        // Trigger review modal if past notification time (e.g. 9:30 AM)
-        final notifyTime = DateTime(
-          now.year,
-          now.month,
-          now.day,
-          _config.notifyHour,
-          _config.notifyMinute,
+        await NotificationService().scheduleCommuteNotification(
+          batchId: _config.pendingReviewBatchId!,
+          hour: _config.notifyHour,
+          minute: _config.notifyMinute,
         );
-        if (now.isAfter(notifyTime)) {
-          onReviewRequested?.call(_config.pendingReviewBatchId!);
-        }
       }
       return false;
     }
@@ -247,23 +258,16 @@ class CommuteAutomationService {
     );
     await saveConfig(updated);
 
-    // If it's already past notify time (9:30 AM), trigger review popup
-    final notifyTime = DateTime(
-      now.year,
-      now.month,
-      now.day,
-      _config.notifyHour,
-      _config.notifyMinute,
+    // Schedule the review notification for notify time.
+    // If notify time has already passed today, the notification fires tomorrow.
+    // Either way the notification (not an auto-popup) is how the user reviews.
+    await NotificationService().scheduleCommuteNotification(
+      batchId: batchId,
+      hour: _config.notifyHour,
+      minute: _config.notifyMinute,
+      title: 'Daily Commute Entry Added',
+      body: 'Data entry successful: CNG (৳80) & Metro (৳36) recorded for today. Tap to keep or discard.',
     );
-
-    if (now.isAfter(notifyTime)) {
-      await NotificationService().showCommuteNotification(
-        batchId: batchId,
-        title: 'Daily Commute Entry Added',
-        body: 'Data entry successful: CNG (৳80) & Metro (৳36) recorded for today. Tap to keep or discard.',
-      );
-      onReviewRequested?.call(batchId);
-    }
 
     return true;
   }

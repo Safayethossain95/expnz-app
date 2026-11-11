@@ -32,7 +32,7 @@ class _WeatherForecastDialogState extends State<WeatherForecastDialog> {
   Future<void> _loadWeather() async {
     setState(() => _isLoading = true);
     final isEnabled = await _weatherService.loadNotificationEnabled();
-    final hours = await _weatherService.fetchHourlyForecast();
+    final hours = await _weatherService.getCachedOrFetchForecast();
     final summary = _weatherService.generateSummary(hours);
 
     if (mounted) {
@@ -294,7 +294,7 @@ class _WeatherForecastDialogState extends State<WeatherForecastDialog> {
                             child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                           )
                         : const Icon(Icons.notifications_active_rounded, size: 18),
-                    label: Text(_isSendingTest ? 'Sending...' : 'Test 9 AM Notification'),
+                    label: Text(_isSendingTest ? 'Sending...' : 'Test Notification'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.forestGreen,
                       foregroundColor: Colors.white,

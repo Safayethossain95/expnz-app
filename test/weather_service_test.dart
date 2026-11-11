@@ -115,5 +115,38 @@ void main() {
       final loadedEnabled = await weatherService.loadNotificationEnabled();
       expect(loadedEnabled, isTrue);
     });
+
+    test('Local storage cache for today prevents repeated network loads', () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      final now = DateTime.now();
+      final todayStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+
+      // Pre-seed SharedPreferences with today's cached weather
+      SharedPreferences.setMockInitialValues({
+        'expnz_weather_cache_date_v1': todayStr,
+        'expnz_weather_cache_data_v1': '''[
+          {
+            "displayDateTime": {"hours": 10},
+            "temperature": {"degrees": 26.0},
+            "precipitation": {"probability": {"percent": 0, "type": "RAIN"}},
+            "weatherCondition": {"description": {"text": "Sunny"}}
+          }
+        ]''',
+      });
+
+      // Clear in-memory cache to test loading directly from SharedPreferences local storage
+      weatherService.resetSessionMemory();
+
+      // Re-populate cache from SharedPreferences
+      final cachedHours = await weatherService.getCachedOrFetchForecast();
+      expect(cachedHours.length, 1);
+      expect(weatherService.hasWeatherForToday, isTrue);
+      expect(weatherService.cachedCurrentTemp, 26);
+      expect(weatherService.cachedCurrentCondition, 'Sunny');
+
+      // Subsequent calls return from memory/local storage without network
+      final cachedAgain = await weatherService.getCachedOrFetchForecast();
+      expect(identical(cachedHours, cachedAgain), isTrue);
+    });
   });
 }
