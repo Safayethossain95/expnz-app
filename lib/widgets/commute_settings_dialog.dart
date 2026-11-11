@@ -146,27 +146,7 @@ class _CommuteSettingsDialogState extends State<CommuteSettingsDialog> {
                 children: [
                   Row(
                     children: [
-                      Icon(Icons.schedule_rounded, size: 16, color: AppColors.forestGreen),
-                      SizedBox(width: 8),
-                      Text(
-                        '7:00 AM',
-                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.textDark),
-                      ),
-                      SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Auto-insert 2 data entries',
-                          textAlign: TextAlign.end,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 12, color: AppColors.textMuted),
-                        ),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Icon(Icons.notifications_active_rounded, size: 16, color: Color(0xFF3B82F6)),
+                      Icon(Icons.notifications_active_rounded, size: 16, color: AppColors.forestGreen),
                       SizedBox(width: 8),
                       Text(
                         '9:30 AM',
@@ -175,7 +155,7 @@ class _CommuteSettingsDialogState extends State<CommuteSettingsDialog> {
                       SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'Keep / Discard prompt',
+                          'Review prompt & insert on Keep',
                           textAlign: TextAlign.end,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(fontSize: 12, color: AppColors.textMuted),

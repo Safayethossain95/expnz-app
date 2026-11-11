@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 import '../providers/expense_provider.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
@@ -8,16 +10,14 @@ import '../widgets/expense_sheet_table.dart';
 import '../widgets/sync_status_card.dart';
 import '../widgets/insights_view.dart';
 import '../widgets/edit_cell_dialogs.dart';
-import '../services/pin_lock_service.dart';
-import '../widgets/set_pin_dialog.dart';
 import 'calculator_screen.dart';
+import 'profile_screen.dart';
 import '../services/commute_automation_service.dart';
 import '../widgets/commute_review_dialog.dart';
 import '../widgets/commute_settings_dialog.dart';
 import '../widgets/top_save_indicator.dart';
 import '../services/weather_service.dart';
 import '../services/notification_service.dart';
-import '../services/month_start_service.dart';
 import '../widgets/weather_forecast_dialog.dart';
 import '../widgets/weather_tools_card.dart';
 import '../widgets/white_loading_screen.dart';
@@ -34,17 +34,27 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   late final ScrollController _scrollController;
   bool _isSavingToDb = false;
+  bool _isCommuteDialogShowing = false;
+  Timer? _commute930Timer;
 
   ExpenseProvider get provider => widget.provider;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _scrollController = ScrollController();
     _initCommuteRoutine();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _checkAndShowCommuteReview();
+    }
   }
 
   void _initCommuteRoutine() {
@@ -53,13 +63,7 @@ class _HomeScreenState extends State<HomeScreen> {
         final commuteService = CommuteAutomationService();
         await commuteService.init(
           onReview: (batchId) {
-            if (mounted) {
-              CommuteReviewDialog.show(
-                context,
-                batchId: batchId,
-                provider: provider,
-              );
-            }
+            _showCommuteDialog(batchId);
           },
           onWeatherTap: () {
             if (mounted) {
@@ -70,12 +74,61 @@ class _HomeScreenState extends State<HomeScreen> {
         await commuteService.checkAndApplyDailyCommute(provider);
         await WeatherService().checkAndApplyLocalMorningWeather();
 
+        // Check if after 9:30 AM and review prompt should popup immediately
+        _checkAndShowCommuteReview();
+
+        // If currently before 9:30 AM, schedule in-app timer to popup at 9:30 AM
+        _schedule930CommuteTimer();
+
         // Handle payload if app was cold-started by a notification tap.
         _handlePendingNotificationPayload();
       } catch (e) {
         debugPrint('Init commute / weather routine error: $e');
       }
     });
+  }
+
+  void _schedule930CommuteTimer() {
+    _commute930Timer?.cancel();
+    final now = DateTime.now();
+    final target = DateTime(now.year, now.month, now.day, 9, 30);
+    if (now.isBefore(target)) {
+      final diff = target.difference(now);
+      _commute930Timer = Timer(diff, () {
+        if (mounted) {
+          _checkAndShowCommuteReview();
+        }
+      });
+    }
+  }
+
+  void _checkAndShowCommuteReview() {
+    if (!mounted || _isCommuteDialogShowing) return;
+
+    final commuteService = CommuteAutomationService();
+    if (!commuteService.shouldPromptReview(provider)) return;
+
+    final now = DateTime.now();
+    final todayStr = DateFormat('yyyy-MM-dd').format(now);
+    final batchId = 'commute_$todayStr';
+
+    _showCommuteDialog(batchId);
+  }
+
+  Future<void> _showCommuteDialog(String batchId) async {
+    if (!mounted || _isCommuteDialogShowing) return;
+    setState(() => _isCommuteDialogShowing = true);
+    try {
+      await CommuteReviewDialog.show(
+        context,
+        batchId: batchId,
+        provider: provider,
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isCommuteDialogShowing = false);
+      }
+    }
   }
 
   /// If the app was launched by tapping a notification while terminated,
@@ -89,16 +142,14 @@ class _HomeScreenState extends State<HomeScreen> {
       WeatherForecastDialog.show(context);
     } else if (payload.isNotEmpty) {
       // It's a commute batchId
-      CommuteReviewDialog.show(
-        context,
-        batchId: payload,
-        provider: provider,
-      );
+      _showCommuteDialog(payload);
     }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _commute930Timer?.cancel();
     _scrollController.dispose();
     super.dispose();
   }
@@ -294,708 +345,12 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _showAccountDialog(BuildContext context) {
-    final authService = AuthService();
-    final user = authService.currentUser;
-    final pinService = PinLockService();
-    final weatherService = WeatherService();
-    bool? weatherEnabledOverride;
-    int? monthStartDayOverride;
-
-    showGeneralDialog(
-      context: context,
-      barrierDismissible: true,
-      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
-      barrierColor: Colors.black.withValues(alpha: 0.54),
-      transitionDuration: const Duration(milliseconds: 260),
-      pageBuilder: (ctx, animation, secondaryAnimation) {
-        return StatefulBuilder(
-          builder: (dialogContext, setDialogState) {
-            return FutureBuilder<List<dynamic>>(
-              future: Future.wait([
-                pinService.isPinEnabled(),
-                weatherService.loadNotificationEnabled(),
-                MonthStartService().load(),
-              ]),
-              builder: (context, snapshot) {
-                final screenWidth = MediaQuery.sizeOf(dialogContext).width;
-                final isPinSet = snapshot.data?[0] as bool? ?? false;
-                final isWeatherEnabled = weatherEnabledOverride ??
-                    (snapshot.data?[1] as bool? ?? weatherService.isNotificationEnabled);
-                final currentMonthStartDay = monthStartDayOverride ??
-                    (snapshot.data?[2] as int? ?? provider.monthStartDay);
-
-                return AlertDialog(
-                  insetPadding: EdgeInsets.symmetric(
-                    horizontal: screenWidth * 0.03, // 3% margin on each side = 94% width
-                    vertical: 24,
-                  ),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                  contentPadding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
-                  content: SizedBox(
-                    width: screenWidth * 0.94,
-                    child: SingleChildScrollView(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                        // Avatar
-                        Container(
-                          width: 64,
-                          height: 64,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: AppColors.mintBadgeBg,
-                            border: Border.all(color: AppColors.forestGreen, width: 2),
-                          ),
-                          child: ClipOval(
-                            child: user?.photoURL != null
-                                ? Image.network(
-                                    user!.photoURL!,
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (_, _, _) => const Icon(
-                                      Icons.person_rounded,
-                                      color: AppColors.forestGreen,
-                                      size: 36,
-                                    ),
-                                  )
-                                : const Icon(
-                                    Icons.person_rounded,
-                                    color: AppColors.forestGreen,
-                                    size: 36,
-                                  ),
-                          ),
-                        ),
-                        const SizedBox(height: 14),
-
-                        Text(
-                          user?.displayName ?? (user != null ? 'Signed In' : 'Guest Mode'),
-                          style: const TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.textDark,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          user?.email ?? 'Using offline local storage only',
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: AppColors.textMuted,
-                          ),
-                        ),
-                        const SizedBox(height: 18),
-
-                        // Cloud Status Box
-                        Builder(
-                          builder: (context) {
-                            final syncError = provider.lastSyncError;
-                            final hasError = user != null && syncError != null;
-                            final isSynced = user != null && !hasError;
-
-                            Color boxBg = isSynced
-                                ? const Color(0xFFF0FDF4)
-                                : (hasError ? const Color(0xFFFEF2F2) : const Color(0xFFFEF3C7));
-                            Color borderColor = isSynced
-                                ? const Color(0xFFBBF7D0)
-                                : (hasError ? const Color(0xFFFECACA) : const Color(0xFFFDE68A));
-                            Color textColor = isSynced
-                                ? AppColors.forestGreen
-                                : (hasError ? const Color(0xFF991B1B) : const Color(0xFF92400E));
-                            IconData statusIcon = isSynced
-                                ? Icons.cloud_done_rounded
-                                : (hasError ? Icons.cloud_off_rounded : Icons.cloud_off_rounded);
-
-                            String message;
-                            if (user == null) {
-                              message = 'Guest mode: Not synced to cloud. Reinstalling will erase local data.';
-                            } else if (hasError) {
-                              message = 'Sync issue: $syncError\n(Check if Firestore is created & rules allow writes)';
-                            } else {
-                              message = 'Cloud Firestore Synced: Your data is backed up safely across uninstalls.';
-                            }
-
-                            return Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                              decoration: BoxDecoration(
-                                color: boxBg,
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: borderColor),
-                              ),
-                              child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 2),
-                                    child: Icon(statusIcon, size: 18, color: textColor),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      message,
-                                      style: TextStyle(
-                                        fontSize: 11.5,
-                                        fontWeight: FontWeight.w600,
-                                        color: textColor,
-                                        height: 1.3,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 14),
-
-                        // App PIN Lock Section
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: isPinSet ? const Color(0xFFF0FDF4) : const Color(0xFFF9FAFB),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: isPinSet ? const Color(0xFFBBF7D0) : const Color(0xFFE5E7EB),
-                            ),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Icon(
-                                    isPinSet ? Icons.lock_outline_rounded : Icons.lock_open_rounded,
-                                    size: 18,
-                                    color: isPinSet ? AppColors.forestGreen : AppColors.textMuted,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  const Expanded(
-                                    child: Text(
-                                      'App PIN Lock',
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w700,
-                                        color: AppColors.textDark,
-                                      ),
-                                    ),
-                                  ),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                    decoration: BoxDecoration(
-                                      color: isPinSet ? const Color(0xFFDCFCE7) : const Color(0xFFF3F4F6),
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Text(
-                                      isPinSet ? 'Active' : 'Off',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w700,
-                                        color: isPinSet ? AppColors.forestGreen : AppColors.textMuted,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                isPinSet
-                                    ? 'App is protected with a 4-digit PIN lock.'
-                                    : 'Set a 4-digit PIN to lock access to your expnz.',
-                                style: const TextStyle(
-                                  fontSize: 11.5,
-                                  color: AppColors.textMuted,
-                                  height: 1.3,
-                                ),
-                              ),
-                              const SizedBox(height: 10),
-                              if (!isPinSet)
-                                SizedBox(
-                                  width: double.infinity,
-                                  height: 38,
-                                  child: ElevatedButton.icon(
-                                    onPressed: () async {
-                                      final success = await SetPinDialog.show(
-                                        context,
-                                        isChangingExisting: false,
-                                        userEmail: user?.email,
-                                      );
-                                      if (success == true) {
-                                        setDialogState(() {});
-                                      }
-                                    },
-                                    icon: const Icon(Icons.pin_rounded, size: 16),
-                                    label: const Text('Set 4-Digit PIN', style: TextStyle(fontSize: 12.5)),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: AppColors.forestGreen,
-                                      foregroundColor: Colors.white,
-                                      elevation: 0,
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                    ),
-                                  ),
-                                )
-                              else
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: SizedBox(
-                                        height: 36,
-                                        child: OutlinedButton(
-                                          onPressed: () async {
-                                            final success = await SetPinDialog.show(
-                                              context,
-                                              isChangingExisting: true,
-                                              userEmail: user?.email,
-                                            );
-                                            if (success == true) {
-                                              setDialogState(() {});
-                                            }
-                                          },
-                                          style: OutlinedButton.styleFrom(
-                                            side: const BorderSide(color: AppColors.forestGreen),
-                                            foregroundColor: AppColors.forestGreen,
-                                            shape: RoundedRectangleBorder(
-                                              borderRadius: BorderRadius.circular(10),
-                                            ),
-                                          ),
-                                          child: const Text(
-                                            'Change PIN',
-                                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: SizedBox(
-                                        height: 36,
-                                        child: TextButton(
-                                          onPressed: () async {
-                                            final confirm = await showDialog<bool>(
-                                              context: context,
-                                              builder: (c) => AlertDialog(
-                                                shape: RoundedRectangleBorder(
-                                                  borderRadius: BorderRadius.circular(18),
-                                                ),
-                                                title: const Text(
-                                                  'Turn Off PIN Lock?',
-                                                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-                                                ),
-                                                content: const Text(
-                                                  'Anyone opening this app will be able to access your expenses without entering a PIN.',
-                                                  style: TextStyle(fontSize: 13, color: AppColors.textMuted),
-                                                ),
-                                                actions: [
-                                                  TextButton(
-                                                    onPressed: () => Navigator.pop(c, false),
-                                                    child: const Text('Cancel'),
-                                                  ),
-                                                  ElevatedButton(
-                                                    style: ElevatedButton.styleFrom(
-                                                      backgroundColor: const Color(0xFFDC2626),
-                                                      foregroundColor: Colors.white,
-                                                      shape: RoundedRectangleBorder(
-                                                        borderRadius: BorderRadius.circular(10),
-                                                      ),
-                                                    ),
-                                                    onPressed: () => Navigator.pop(c, true),
-                                                    child: const Text('Turn Off'),
-                                                  ),
-                                                ],
-                                              ),
-                                            );
-                                            if (confirm == true) {
-                                              await pinService.removePin();
-                                              setDialogState(() {});
-                                            }
-                                          },
-                                          style: TextButton.styleFrom(
-                                            foregroundColor: const Color(0xFFDC2626),
-                                            shape: RoundedRectangleBorder(
-                                              borderRadius: BorderRadius.circular(10),
-                                            ),
-                                          ),
-                                          child: const Text(
-                                            'Turn Off',
-                                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 14),
-
-                        // Daily Commute Section
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF9FAFB),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: const Color(0xFFE5E7EB)),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  const Icon(Icons.commute_rounded, size: 18, color: AppColors.forestGreen),
-                                  const SizedBox(width: 8),
-                                  const Expanded(
-                                    child: Text(
-                                      'Daily Commute Routine',
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w700,
-                                        color: AppColors.textDark,
-                                      ),
-                                    ),
-                                  ),
-                                  TextButton(
-                                    onPressed: () {
-                                      Navigator.pop(ctx);
-                                      CommuteSettingsDialog.show(context, provider);
-                                    },
-                                    style: TextButton.styleFrom(
-                                      padding: EdgeInsets.zero,
-                                      minimumSize: const Size(60, 28),
-                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                    ),
-                                    child: const Text(
-                                      'Configure',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold,
-                                        color: AppColors.forestGreen,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              const Text(
-                                'Auto-inserts CNG (৳80) & Metro (৳36) at 7:00 AM with 9:30 AM review prompt.',
-                                style: TextStyle(
-                                  fontSize: 11.5,
-                                  color: AppColors.textMuted,
-                                  height: 1.3,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        // 9 AM Weather Automation Card with On/Off Toggle
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: isWeatherEnabled
-                                ? Colors.orange.withValues(alpha: 0.06)
-                                : const Color(0xFFF9FAFB),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: isWeatherEnabled
-                                  ? Colors.orange.withValues(alpha: 0.25)
-                                  : const Color(0xFFE5E7EB),
-                            ),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Icon(
-                                    Icons.wb_sunny_rounded,
-                                    size: 18,
-                                    color: isWeatherEnabled ? Colors.orange : AppColors.textMuted,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      '9:00 AM Weather Alert',
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w700,
-                                        color: isWeatherEnabled ? AppColors.textDark : AppColors.textMuted,
-                                      ),
-                                    ),
-                                  ),
-                                  Transform.scale(
-                                    scale: 0.8,
-                                    child: Switch.adaptive(
-                                      value: isWeatherEnabled,
-                                      activeTrackColor: Colors.orange,
-                                      onChanged: (val) async {
-                                        setDialogState(() {
-                                          weatherEnabledOverride = val;
-                                        });
-                                        await weatherService.setNotificationEnabled(val);
-                                      },
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 2),
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      isWeatherEnabled
-                                          ? 'Delivering at 9:00 AM with temperature & rain prediction.'
-                                          : 'Weather push notifications disabled. Turn on to resume.',
-                                      style: TextStyle(
-                                        fontSize: 11.5,
-                                        color: AppColors.textMuted,
-                                        height: 1.3,
-                                      ),
-                                    ),
-                                  ),
-                                  if (isWeatherEnabled)
-                                    TextButton(
-                                      onPressed: () {
-                                        Navigator.pop(ctx);
-                                        WeatherForecastDialog.show(context);
-                                      },
-                                      style: TextButton.styleFrom(
-                                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                                        minimumSize: const Size(50, 24),
-                                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                      ),
-                                      child: const Text(
-                                        'View / Test',
-                                        style: TextStyle(
-                                          fontSize: 11.5,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.orange,
-                                        ),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 14),
-
-                        // ── Month Start Day Picker ──────────────────────────
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF0F9FF),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: const Color(0xFFBAE6FD)),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  const Icon(
-                                    Icons.calendar_month_rounded,
-                                    size: 18,
-                                    color: Color(0xFF0369A1),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  const Expanded(
-                                    child: Text(
-                                      'Month Start Date',
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w700,
-                                        color: AppColors.textDark,
-                                      ),
-                                    ),
-                                  ),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFFE0F2FE),
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Text(
-                                      _ordinalDay(currentMonthStartDay),
-                                      style: const TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w700,
-                                        color: Color(0xFF0369A1),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                currentMonthStartDay == 1
-                                    ? 'Using calendar month (1st to last day).'
-                                    : 'This month filter: ${MonthStartService().periodLabel()}',
-                                style: const TextStyle(
-                                  fontSize: 11.5,
-                                  color: AppColors.textMuted,
-                                  height: 1.3,
-                                ),
-                              ),
-                              const SizedBox(height: 10),
-                              // Day picker chips – scrollable row
-                              SizedBox(
-                                height: 34,
-                                child: ListView.separated(
-                                  scrollDirection: Axis.horizontal,
-                                  itemCount: 28,
-                                  separatorBuilder: (_, _) => const SizedBox(width: 6),
-                                  itemBuilder: (_, i) {
-                                    final day = i + 1;
-                                    final isSelected = day == currentMonthStartDay;
-                                    return GestureDetector(
-                                      onTap: () async {
-                                        setDialogState(() {
-                                          monthStartDayOverride = day;
-                                        });
-                                        await provider.setMonthStartDay(day);
-                                      },
-                                      child: AnimatedContainer(
-                                        duration: const Duration(milliseconds: 180),
-                                        width: 34,
-                                        height: 34,
-                                        decoration: BoxDecoration(
-                                          color: isSelected
-                                              ? const Color(0xFF0369A1)
-                                              : const Color(0xFFE0F2FE),
-                                          borderRadius: BorderRadius.circular(8),
-                                        ),
-                                        alignment: Alignment.center,
-                                        child: Text(
-                                          '$day',
-                                          style: TextStyle(
-                                            fontSize: 12.5,
-                                            fontWeight: FontWeight.w700,
-                                            color: isSelected
-                                                ? Colors.white
-                                                : const Color(0xFF0369A1),
-                                          ),
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 18),
-
-              if (user != null) ...[
-                // Push / Sync Now Button
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: () async {
-                      Navigator.pop(ctx);
-                      final ok = await provider.pushToCloud();
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              ok
-                                  ? 'Data successfully saved to Cloud Firestore!'
-                                  : 'Sync failed: ${provider.lastSyncError ?? "Check Firestore permissions"}',
-                            ),
-                            backgroundColor: ok ? AppColors.forestGreen : const Color(0xFF991B1B),
-                            duration: Duration(seconds: ok ? 3 : 5),
-                            behavior: SnackBarBehavior.floating,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                          ),
-                        );
-                      }
-                    },
-                    icon: const Icon(Icons.sync_rounded, size: 18, color: AppColors.forestGreen),
-                    label: const Text(
-                      'Sync Now with Cloud',
-                      style: TextStyle(color: AppColors.forestGreen, fontWeight: FontWeight.w700),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: AppColors.forestGreen),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-
-                // Sign Out Button
-                SizedBox(
-                  width: double.infinity,
-                  child: TextButton.icon(
-                    onPressed: () async {
-                      Navigator.pop(ctx);
-                      await authService.signOut();
-                    },
-                    icon: const Icon(Icons.logout_rounded, size: 18, color: Color(0xFFDC2626)),
-                    label: const Text(
-                      'Sign Out',
-                      style: TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                ),
-              ] else ...[
-                // Sign in with Google Button
-                SizedBox(
-                  width: double.infinity,
-                  height: 46,
-                  child: ElevatedButton.icon(
-                    onPressed: () async {
-                      Navigator.pop(ctx);
-                      try {
-                        await authService.signInWithGoogle();
-                      } catch (e) {
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Sign-in failed: $e'),
-                              backgroundColor: const Color(0xFFDC2626),
-                            ),
-                          );
-                        }
-                      }
-                    },
-                    icon: const Icon(Icons.login_rounded, size: 18),
-                    label: const Text('Sign in with Google'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.forestGreen,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
+  void _openProfileScreen(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ProfileScreen(provider: provider),
       ),
-    );
-  },
-);
-},
-);
-      },
-      transitionBuilder: (ctx, animation, secondaryAnimation, child) {
-        final curved = CurvedAnimation(
-          parent: animation,
-          curve: Curves.easeOutCubic,
-          reverseCurve: Curves.easeInCubic,
-        );
-        return ScaleTransition(
-          scale: Tween<double>(begin: 0.82, end: 1.0).animate(curved),
-          child: FadeTransition(
-            opacity: CurvedAnimation(
-              parent: animation,
-              curve: Curves.easeOut,
-            ),
-            child: child,
-          ),
-        );
-      },
     );
   }
 
@@ -1033,13 +388,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   title: Text(user != null ? 'Account & Cloud Sync (${user.email})' : 'Sign in to Back up to Cloud'),
                   onTap: () {
                     Navigator.pop(ctx);
-                    _showAccountDialog(context);
+                    _openProfileScreen(context);
                   },
                 ),
                 ListTile(
                   leading: const Icon(Icons.commute_rounded, color: AppColors.forestGreen),
                   title: const Text('Daily Commute Automation'),
-                  subtitle: const Text('7 AM Auto-insert & 9:30 AM Keep/Discard prompt', style: TextStyle(fontSize: 12)),
+                  subtitle: const Text('9:30 AM prompt to review & insert CNG (৳80) & Metro (৳36)', style: TextStyle(fontSize: 12)),
                   onTap: () {
                     Navigator.pop(ctx);
                     CommuteSettingsDialog.show(context, provider);
@@ -1190,7 +545,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             final currentUser = AuthService().currentUser;
                             return InkWell(
                               borderRadius: BorderRadius.circular(24),
-                              onTap: () => _showAccountDialog(context),
+                              onTap: () => _openProfileScreen(context),
                               child: Stack(
                                 clipBehavior: Clip.none,
                                 children: [

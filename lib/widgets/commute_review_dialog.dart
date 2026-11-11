@@ -22,9 +22,12 @@ class CommuteReviewDialog extends StatelessWidget {
     await showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => CommuteReviewDialog(
-        batchId: batchId,
-        provider: provider,
+      builder: (ctx) => PopScope(
+        canPop: false,
+        child: CommuteReviewDialog(
+          batchId: batchId,
+          provider: provider,
+        ),
       ),
     );
   }
@@ -34,7 +37,7 @@ class CommuteReviewDialog extends StatelessWidget {
     final commuteService = CommuteAutomationService();
     final items = provider.allExpenses.where((e) => e.batchId == batchId).toList();
 
-    // Fallback if not found by batchId
+    // Fallback if not found by batchId (items have not been inserted yet)
     final displayItems = items.isNotEmpty
         ? items
         : commuteService.config.items.map((t) {
@@ -49,166 +52,169 @@ class CommuteReviewDialog extends StatelessWidget {
 
     final total = displayItems.fold<double>(0.0, (sum, item) => sum + item.amount);
 
-    return AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-      backgroundColor: Colors.white,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-      contentPadding: const EdgeInsets.fromLTRB(22, 24, 22, 20),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Icon & Header
-          Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: AppColors.mintBadgeBg,
-                  borderRadius: BorderRadius.circular(14),
+    return PopScope(
+      canPop: false,
+      child: AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        backgroundColor: Colors.white,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+        contentPadding: const EdgeInsets.fromLTRB(22, 24, 22, 20),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Icon & Header
+            Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: AppColors.mintBadgeBg,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Icon(
+                    Icons.notifications_active_rounded,
+                    color: AppColors.forestGreen,
+                    size: 24,
+                  ),
                 ),
-                child: const Icon(
-                  Icons.notifications_active_rounded,
-                  color: AppColors.forestGreen,
-                  size: 24,
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Daily Commute Review',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.textDark,
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '9:30 AM Review • ৳${total.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.forestGreen,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'The following expenses are scheduled for your daily commute. Would you like to keep and record them, or discard them for today?',
+              style: TextStyle(
+                fontSize: 13,
+                color: AppColors.textMuted,
+                height: 1.4,
               ),
-              const SizedBox(width: 14),
-              Expanded(
+            ),
+            const SizedBox(height: 18),
+
+            // Items Table Preview matching the screenshot
+            Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFFF9FAFB),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFFE5E7EB)),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Daily Commute Entry',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.textDark,
-                        letterSpacing: -0.3,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Auto-inserted at 7:00 AM • ৳${total.toStringAsFixed(2)}',
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.forestGreen,
-                      ),
-                    ),
+                    for (int i = 0; i < displayItems.length; i++) ...[
+                      _buildItemRow(i + 1, displayItems[i]),
+                      if (i < displayItems.length - 1)
+                        const Divider(height: 1, color: Color(0xFFE5E7EB)),
+                    ],
                   ],
                 ),
               ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          const Text(
-            'The following 2 expenses were recorded for your daily commute. Would you like to keep them or discard them?',
-            style: TextStyle(
-              fontSize: 13,
-              color: AppColors.textMuted,
-              height: 1.4,
             ),
-          ),
-          const SizedBox(height: 18),
+            const SizedBox(height: 24),
 
-          // Items Table Preview matching the screenshot
-          Container(
-            decoration: BoxDecoration(
-              color: const Color(0xFFF9FAFB),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFFE5E7EB)),
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: Column(
-                children: [
-                  for (int i = 0; i < displayItems.length; i++) ...[
-                    _buildItemRow(i + 1, displayItems[i]),
-                    if (i < displayItems.length - 1)
-                      const Divider(height: 1, color: Color(0xFFE5E7EB)),
-                  ],
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 24),
-
-          // Actions: Keep or Discard
-          Row(
-            children: [
-              // Discard Button
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () async {
-                    Navigator.of(context).pop();
-                    await commuteService.discardBatch(batchId, provider);
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Commute entries discarded'),
-                          backgroundColor: Color(0xFF374151),
-                          duration: Duration(seconds: 3),
-                        ),
-                      );
-                    }
-                  },
-                  icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                  label: const Text(
-                    'Discard',
-                    style: TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFFDC2626),
-                    backgroundColor: const Color(0xFFFEF2F2),
-                    side: const BorderSide(color: Color(0xFFFECACA)),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-
-              // Keep Button
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: () async {
-                    Navigator.of(context).pop();
-                    await commuteService.keepBatch(batchId);
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            'Daily commute kept (৳${total.toStringAsFixed(2)})',
+            // Actions: Keep or Discard
+            Row(
+              children: [
+                // Discard Button
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      Navigator.of(context).pop();
+                      await commuteService.discardBatch(batchId, provider);
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Commute entries discarded for today'),
+                            backgroundColor: Color(0xFF374151),
+                            duration: Duration(seconds: 3),
                           ),
-                          backgroundColor: AppColors.forestGreen,
-                          duration: const Duration(seconds: 3),
-                        ),
-                      );
-                    }
-                  },
-                  icon: const Icon(Icons.check_rounded, size: 18),
-                  label: const Text(
-                    'Keep',
-                    style: TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    backgroundColor: AppColors.forestGreen,
-                    elevation: 0,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
+                        );
+                      }
+                    },
+                    icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                    label: const Text(
+                      'Discard',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFFDC2626),
+                      backgroundColor: const Color(0xFFFEF2F2),
+                      side: const BorderSide(color: Color(0xFFFECACA)),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
-          ),
-        ],
+                const SizedBox(width: 12),
+
+                // Keep Button
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      Navigator.of(context).pop();
+                      await commuteService.keepBatch(batchId, provider);
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              'Daily commute added (৳${total.toStringAsFixed(2)})',
+                            ),
+                            backgroundColor: AppColors.forestGreen,
+                            duration: const Duration(seconds: 3),
+                          ),
+                        );
+                      }
+                    },
+                    icon: const Icon(Icons.check_rounded, size: 18),
+                    label: const Text(
+                      'Keep',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      backgroundColor: AppColors.forestGreen,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

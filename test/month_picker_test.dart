@@ -52,7 +52,7 @@ void main() {
 
       // Add expense in current period
       await provider.addNewRow(
-        date: currentPeriod.start,
+        date: currentPeriod.start.add(const Duration(days: 1)),
         description: 'Current Month Grocery',
         amount: 3000.0,
         category: ExpenseCategory.food,

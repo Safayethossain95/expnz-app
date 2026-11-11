@@ -105,9 +105,9 @@ class CommuteAutomationService {
         if (batchId != null && batchId.isNotEmpty) {
           NotificationService().showCommuteNotification(
             batchId: batchId,
-            title: message.notification?.title ?? 'Daily Commute Entry Added',
+            title: message.notification?.title ?? 'Daily Commute Review',
             body: message.notification?.body ??
-                'Data entry successful: CNG (৳80) & Metro (৳36) recorded for today. Tap to review.',
+                'Review today\'s commute: CNG (৳80) & Metro (৳36). Tap to keep or discard.',
           );
           onReviewRequested?.call(batchId);
         }
@@ -191,50 +191,57 @@ class CommuteAutomationService {
     }
   }
 
-  /// Automatically checks if 7:00 AM today's commute data should be inserted.
-  /// Works reliably both standalone and in coordination with Cloud Functions.
+  /// Returns true if it is at/after 9:30 AM and today's commute decision is pending
+  /// (i.e. neither Kept nor Discarded yet, and no commute items exist for today).
+  bool shouldPromptReview(ExpenseProvider provider) {
+    if (!_config.enabled) return false;
+
+    final now = DateTime.now();
+    // Only prompt after 9:30 AM
+    final isAfter930 = now.hour > _config.notifyHour ||
+        (now.hour == _config.notifyHour && now.minute >= _config.notifyMinute);
+    if (!isAfter930) return false;
+
+    final todayStr = DateFormat('yyyy-MM-dd').format(now);
+    // If user already made a decision (keep or discard) today, don't prompt again
+    if (_config.lastDecisionDate == todayStr) {
+      return false;
+    }
+
+    final batchId = 'commute_$todayStr';
+    final alreadyExists = provider.allExpenses.any((e) => e.batchId == batchId);
+    if (alreadyExists) return false;
+
+    return true;
+  }
+
+  /// Schedules daily 9:30 AM review notification.
+  /// Does NOT auto-insert at 7:00 AM. Insertion only happens when "Keep" is clicked.
   Future<bool> checkAndApplyDailyCommute(ExpenseProvider provider) async {
     if (!_config.enabled) return false;
 
     final now = DateTime.now();
     final todayStr = DateFormat('yyyy-MM-dd').format(now);
-
-    // If today is already inserted, skip insertion
-    if (_config.lastInsertedDate == todayStr) {
-      // If there's still an unreviewed batch, re-schedule the notification
-      // (do NOT auto-open the popup — user will tap the notification).
-      if (_config.pendingReviewBatchId != null &&
-          _config.pendingReviewBatchId!.isNotEmpty) {
-        await NotificationService().scheduleCommuteNotification(
-          batchId: _config.pendingReviewBatchId!,
-          hour: _config.notifyHour,
-          minute: _config.notifyMinute,
-        );
-      }
-      return false;
-    }
-
-    // Check if current time has passed the scheduled insertion time (default 7:00 AM)
-    final scheduledInsertTime = DateTime(
-      now.year,
-      now.month,
-      now.day,
-      _config.insertHour,
-      _config.insertMinute,
-    );
-
-    if (now.isBefore(scheduledInsertTime)) {
-      // Not yet 7:00 AM
-      return false;
-    }
-
     final batchId = 'commute_$todayStr';
 
-    // Check if these items already exist in the provider to prevent duplicates
-    final alreadyExists = provider.allExpenses.any(
-      (e) => e.batchId == batchId,
+    // Schedule 9:30 AM review notification
+    await NotificationService().scheduleCommuteNotification(
+      batchId: batchId,
+      hour: _config.notifyHour,
+      minute: _config.notifyMinute,
+      title: 'Daily Commute Review',
+      body: 'Review today\'s commute: CNG (৳80) & Metro (৳36). Tap to keep or discard.',
     );
 
+    return shouldPromptReview(provider);
+  }
+
+  /// User clicked "Keep": entries are inserted into today's expenses and saved
+  Future<void> keepBatch(String batchId, ExpenseProvider provider) async {
+    final now = DateTime.now();
+    final todayStr = DateFormat('yyyy-MM-dd').format(now);
+
+    final alreadyExists = provider.allExpenses.any((e) => e.batchId == batchId);
     if (!alreadyExists) {
       final newItems = _config.items.map((template) {
         return ExpenseItem(
@@ -251,37 +258,27 @@ class CommuteAutomationService {
       await provider.addExpenseItems(newItems);
     }
 
-    // Update config with last inserted date and pending batch ID
     final updated = _config.copyWith(
       lastInsertedDate: todayStr,
-      pendingReviewBatchId: batchId,
+      lastDecisionDate: todayStr,
+      lastDecision: 'keep',
+      clearPendingReview: true,
     );
-    await saveConfig(updated);
-
-    // Schedule the review notification for notify time.
-    // If notify time has already passed today, the notification fires tomorrow.
-    // Either way the notification (not an auto-popup) is how the user reviews.
-    await NotificationService().scheduleCommuteNotification(
-      batchId: batchId,
-      hour: _config.notifyHour,
-      minute: _config.notifyMinute,
-      title: 'Daily Commute Entry Added',
-      body: 'Data entry successful: CNG (৳80) & Metro (৳36) recorded for today. Tap to keep or discard.',
-    );
-
-    return true;
-  }
-
-  /// User clicked "Keep": entries remain in the list, pending review is cleared
-  Future<void> keepBatch(String batchId) async {
-    final updated = _config.copyWith(clearPendingReview: true);
     await saveConfig(updated);
   }
 
-  /// User clicked "Discard": delete the batch entries from the provider
+  /// User clicked "Discard": items are NOT inserted (or removed if already existed),
+  /// and today is marked as handled so it won't prompt again today.
   Future<void> discardBatch(String batchId, ExpenseProvider provider) async {
+    final now = DateTime.now();
+    final todayStr = DateFormat('yyyy-MM-dd').format(now);
+
     await provider.deleteItemsByBatchId(batchId);
-    final updated = _config.copyWith(clearPendingReview: true);
+    final updated = _config.copyWith(
+      lastDecisionDate: todayStr,
+      lastDecision: 'discard',
+      clearPendingReview: true,
+    );
     await saveConfig(updated);
   }
 }

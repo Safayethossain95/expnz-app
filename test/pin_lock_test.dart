@@ -210,10 +210,13 @@ void main() {
       expect(unlocked, isFalse);
 
       // Enter correct PIN: 2, 5, 8, 0
-      for (final digit in ['2', '5', '8', '0']) {
+      for (final digit in ['2', '5', '8']) {
         await tester.tap(find.text(digit));
         await tester.pumpAndSettle();
       }
+      await tester.tap(find.text('0'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
 
       expect(unlocked, isTrue);
     });

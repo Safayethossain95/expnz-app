@@ -49,6 +49,8 @@ class CommuteConfig {
   final List<CommuteItemTemplate> items;
   final String? lastInsertedDate;
   final String? pendingReviewBatchId;
+  final String? lastDecisionDate;
+  final String? lastDecision; // 'keep' | 'discard'
 
   const CommuteConfig({
     this.enabled = true,
@@ -59,6 +61,8 @@ class CommuteConfig {
     required this.items,
     this.lastInsertedDate,
     this.pendingReviewBatchId,
+    this.lastDecisionDate,
+    this.lastDecision,
   });
 
   static List<CommuteItemTemplate> get defaultItems => const [
@@ -84,6 +88,8 @@ class CommuteConfig {
       items: defaultItems,
       lastInsertedDate: null,
       pendingReviewBatchId: null,
+      lastDecisionDate: null,
+      lastDecision: null,
     );
   }
 
@@ -97,6 +103,8 @@ class CommuteConfig {
       'items': items.map((e) => e.toMap()).toList(),
       'lastInsertedDate': lastInsertedDate,
       'pendingReviewBatchId': pendingReviewBatchId,
+      'lastDecisionDate': lastDecisionDate,
+      'lastDecision': lastDecision,
     };
   }
 
@@ -117,6 +125,8 @@ class CommuteConfig {
       items: parsedItems.isNotEmpty ? parsedItems : defaultItems,
       lastInsertedDate: map['lastInsertedDate'] as String?,
       pendingReviewBatchId: map['pendingReviewBatchId'] as String?,
+      lastDecisionDate: map['lastDecisionDate'] as String?,
+      lastDecision: map['lastDecision'] as String?,
     );
   }
 
@@ -129,6 +139,8 @@ class CommuteConfig {
     List<CommuteItemTemplate>? items,
     String? lastInsertedDate,
     String? pendingReviewBatchId,
+    String? lastDecisionDate,
+    String? lastDecision,
     bool clearPendingReview = false,
   }) {
     return CommuteConfig(
@@ -140,6 +152,8 @@ class CommuteConfig {
       items: items ?? this.items,
       lastInsertedDate: lastInsertedDate ?? this.lastInsertedDate,
       pendingReviewBatchId: clearPendingReview ? null : (pendingReviewBatchId ?? this.pendingReviewBatchId),
+      lastDecisionDate: lastDecisionDate ?? this.lastDecisionDate,
+      lastDecision: lastDecision ?? this.lastDecision,
     );
   }
 }

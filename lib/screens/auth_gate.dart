@@ -22,6 +22,7 @@ class _AuthGateState extends State<AuthGate> {
   final PinLockService _pinService = PinLockService();
   bool _guestMode = false;
   String? _lastLoadedUid;
+  String? _pinCheckedUid;
   bool _isPinUnlocked = false;
   bool _isCheckingPin = true;
   bool _pinEnabled = false;
@@ -30,15 +31,33 @@ class _AuthGateState extends State<AuthGate> {
   @override
   void initState() {
     super.initState();
-    _checkPinLock();
+    _checkInitialPinLock();
   }
 
-  Future<void> _checkPinLock() async {
-    final enabled = await _pinService.isPinEnabled();
+  Future<void> _checkInitialPinLock() async {
+    final currentUser = _authService.currentUser;
+    if (currentUser != null) {
+      await _checkPinLockForUser(currentUser.uid);
+    } else {
+      if (mounted) {
+        setState(() {
+          _isCheckingPin = false;
+          _pinEnabled = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _checkPinLockForUser(String uid) async {
+    _pinCheckedUid = uid;
+    final enabled = await _pinService.isPinEnabled(userId: uid);
     if (mounted) {
       setState(() {
         _pinEnabled = enabled;
         _isCheckingPin = false;
+        if (!enabled) {
+          _isPinUnlocked = true;
+        }
       });
     }
   }
@@ -65,44 +84,6 @@ class _AuthGateState extends State<AuthGate> {
       return const WhiteLoadingScreen();
     }
 
-    if (_pinEnabled && !_isPinUnlocked) {
-      return PinLockScreen(
-        onUnlocked: () async {
-          setState(() {
-            _isPinUnlocked = true;
-            _isDataLoading = true;
-          });
-          final currentUser = _authService.currentUser;
-          if (currentUser != null) {
-            _lastLoadedUid = currentUser.uid;
-            await widget.provider.onUserChanged(currentUser.uid);
-          } else if (_guestMode) {
-            _lastLoadedUid = null;
-            await widget.provider.onUserChanged(null);
-          } else {
-            final user = await _authService.authStateChanges.first;
-            if (user != null) {
-              _lastLoadedUid = user.uid;
-              await widget.provider.onUserChanged(user.uid);
-            }
-          }
-          await Future.delayed(const Duration(milliseconds: 300));
-          if (mounted) {
-            setState(() {
-              _isDataLoading = false;
-            });
-          }
-        },
-        onResetAuth: () {
-          setState(() {
-            _pinEnabled = false;
-            _isPinUnlocked = true;
-            _guestMode = false;
-          });
-        },
-      );
-    }
-
     return StreamBuilder<User?>(
       stream: _authService.authStateChanges,
       builder: (context, snapshot) {
@@ -113,7 +94,66 @@ class _AuthGateState extends State<AuthGate> {
 
         final user = snapshot.data;
 
-        // If authenticated
+        // Reset pin state on sign-out
+        if (user == null && !_guestMode) {
+          _isPinUnlocked = false;
+          _pinCheckedUid = null;
+          _lastLoadedUid = null;
+          _pinEnabled = false;
+          return SignInScreen(
+            onContinueAsGuest: () {
+              setState(() {
+                _guestMode = true;
+              });
+            },
+          );
+        }
+
+        final activeUid = user?.uid;
+
+        // If authenticated user changed, verify their account-specific PIN
+        if (activeUid != null && _pinCheckedUid != activeUid) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _checkPinLockForUser(activeUid);
+          });
+          return const WhiteLoadingScreen();
+        }
+
+        // If this user has PIN enabled and hasn't unlocked yet, show PIN lock screen
+        if (_pinEnabled && !_isPinUnlocked) {
+          return PinLockScreen(
+            onUnlocked: () async {
+              setState(() {
+                _isPinUnlocked = true;
+                _isDataLoading = true;
+              });
+              if (user != null) {
+                _lastLoadedUid = user.uid;
+                await widget.provider.onUserChanged(user.uid);
+              } else if (_guestMode) {
+                _lastLoadedUid = null;
+                await widget.provider.onUserChanged(null);
+              }
+              await Future.delayed(const Duration(milliseconds: 300));
+              if (mounted) {
+                setState(() {
+                  _isDataLoading = false;
+                });
+              }
+            },
+            onResetAuth: () {
+              setState(() {
+                _pinEnabled = false;
+                _isPinUnlocked = false;
+                _pinCheckedUid = null;
+                _lastLoadedUid = null;
+                _guestMode = false;
+              });
+            },
+          );
+        }
+
+        // If authenticated and unlocked
         if (user != null) {
           if (_lastLoadedUid != user.uid) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -135,7 +175,6 @@ class _AuthGateState extends State<AuthGate> {
           return HomeScreen(provider: widget.provider);
         }
 
-        // Otherwise show Sign In screen
         return SignInScreen(
           onContinueAsGuest: () {
             setState(() {

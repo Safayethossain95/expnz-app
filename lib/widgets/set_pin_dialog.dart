@@ -12,17 +12,20 @@ enum _PinStep {
 
 class SetPinDialog extends StatefulWidget {
   final bool isChangingExisting;
+  final String? userId;
   final String? userEmail;
 
   const SetPinDialog({
     super.key,
     this.isChangingExisting = false,
+    this.userId,
     this.userEmail,
   });
 
   static Future<bool?> show(
     BuildContext context, {
     bool isChangingExisting = false,
+    String? userId,
     String? userEmail,
   }) {
     return showDialog<bool>(
@@ -33,6 +36,7 @@ class SetPinDialog extends StatefulWidget {
         insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
         child: SetPinDialog(
           isChangingExisting: isChangingExisting,
+          userId: userId,
           userEmail: userEmail,
         ),
       ),
@@ -133,7 +137,7 @@ class _SetPinDialogState extends State<SetPinDialog>
   Future<void> _processCompleteInput(String pin) async {
     switch (_step) {
       case _PinStep.enterCurrent:
-        final isValid = await _pinService.verifyPin(pin);
+        final isValid = await _pinService.verifyPin(pin, userId: widget.userId);
         if (!isValid) {
           _triggerError('Incorrect current PIN. Try again.');
         } else {
@@ -164,7 +168,7 @@ class _SetPinDialogState extends State<SetPinDialog>
           });
         } else {
           // Success! Save PIN
-          await _pinService.setPin(pin, userEmail: widget.userEmail);
+          await _pinService.setPin(pin, userId: widget.userId, userEmail: widget.userEmail);
           setState(() {
             _step = _PinStep.success;
           });

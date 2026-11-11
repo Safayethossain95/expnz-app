@@ -142,7 +142,7 @@ class _PinLockScreenState extends State<PinLockScreen>
             ),
             onPressed: () async {
               Navigator.pop(ctx);
-              await _pinService.removePin();
+              await _pinService.removePin(userId: _authService.currentUser?.uid);
               await _authService.signOut();
               if (widget.onResetAuth != null) {
                 widget.onResetAuth!();

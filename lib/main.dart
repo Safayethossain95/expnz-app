@@ -37,9 +37,9 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     if (batchId != null && batchId.isNotEmpty) {
       await notificationService.showCommuteNotification(
         batchId: batchId,
-        title: message.notification?.title ?? 'Daily Commute Entry Added',
+        title: message.notification?.title ?? 'Daily Commute Review',
         body: message.notification?.body ??
-            'Data entry successful: CNG (৳80) & Metro (৳36) recorded for today. Tap to keep or discard.',
+            'Review today\'s commute: CNG (৳80) & Metro (৳36). Tap to keep or discard.',
       );
     }
   }
