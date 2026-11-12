@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
@@ -21,11 +22,31 @@ class CommuteAutomationService {
 
   static const String _prefKeyConfig = 'expnz_commute_config_v1';
   final _uuid = const Uuid();
-  FirebaseFirestore get _firestore => FirebaseFirestore.instance;
-  FirebaseAuth get _auth => FirebaseAuth.instance;
+  FirebaseFirestore? get _firestore {
+    try {
+      if (Firebase.apps.isNotEmpty) {
+        return FirebaseFirestore.instance;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  FirebaseAuth? get _auth {
+    try {
+      if (Firebase.apps.isNotEmpty) {
+        return FirebaseAuth.instance;
+      }
+    } catch (_) {}
+    return null;
+  }
 
   CommuteConfig _config = CommuteConfig.initial();
   CommuteConfig get config => _config;
+
+  @visibleForTesting
+  void resetForTesting() {
+    _config = CommuteConfig.initial();
+  }
 
   Function(String batchId)? onReviewRequested;
   VoidCallback? onWeatherTapped;
@@ -126,10 +147,11 @@ class CommuteAutomationService {
   }
 
   Future<void> _saveFcmTokenToCloud(String token) async {
-    final user = _auth.currentUser;
-    if (user != null) {
+    final user = _auth?.currentUser;
+    final firestore = _firestore;
+    if (user != null && firestore != null) {
       try {
-        await _firestore.collection('users').doc(user.uid).set({
+        await firestore.collection('users').doc(user.uid).set({
           'fcmToken': token,
           'fcmUpdatedAt': FieldValue.serverTimestamp(),
           'devicePlatform': kIsWeb ? 'web' : defaultTargetPlatform.name,
@@ -147,12 +169,15 @@ class CommuteAutomationService {
       try {
         _config = CommuteConfig.fromMap(jsonDecode(jsonStr));
       } catch (_) {}
+    } else {
+      _config = CommuteConfig.initial();
     }
 
-    final user = _auth.currentUser;
-    if (user != null) {
+    final user = _auth?.currentUser;
+    final firestore = _firestore;
+    if (user != null && firestore != null) {
       try {
-        final doc = await _firestore
+        final doc = await firestore
             .collection('users')
             .doc(user.uid)
             .collection('settings')
@@ -176,10 +201,11 @@ class CommuteAutomationService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefKeyConfig, jsonEncode(_config.toMap()));
 
-    final user = _auth.currentUser;
-    if (user != null) {
+    final user = _auth?.currentUser;
+    final firestore = _firestore;
+    if (user != null && firestore != null) {
       try {
-        await _firestore
+        await firestore
             .collection('users')
             .doc(user.uid)
             .collection('settings')
@@ -191,16 +217,54 @@ class CommuteAutomationService {
     }
   }
 
-  /// Returns true if it is at/after 9:30 AM and today's commute decision is pending
+  /// Updates the notification and review prompt time (hour, minute) and reschedules notification
+  Future<void> updateNotifyTime(int hour, int minute) async {
+    final updated = _config.copyWith(notifyHour: hour, notifyMinute: minute);
+    await saveConfig(updated);
+    if (updated.enabled) {
+      final now = DateTime.now();
+      final todayStr = DateFormat('yyyy-MM-dd').format(now);
+      final batchId = 'commute_$todayStr';
+      final summaryStr = _config.items.isEmpty
+          ? 'No items'
+          : _config.items
+              .map((i) => '${i.description} (৳${i.amount.toInt() == i.amount ? i.amount.toInt() : i.amount})')
+              .join(' & ');
+      await NotificationService().scheduleCommuteNotification(
+        batchId: batchId,
+        hour: hour,
+        minute: minute,
+        title: 'Daily Commute Review',
+        body: 'Review today\'s commute: $summaryStr. Tap to keep or discard.',
+      );
+    }
+  }
+
+  /// Updates the default commute items template inserted every morning
+  Future<void> updateItems(List<CommuteItemTemplate> items) async {
+    final updated = _config.copyWith(items: items);
+    await saveConfig(updated);
+  }
+
+  /// Enables or disables daily commute automation
+  Future<void> setEnabled(bool enabled) async {
+    final updated = _config.copyWith(enabled: enabled);
+    await saveConfig(updated);
+    if (!enabled) {
+      await NotificationService().cancelNotification(1001);
+    }
+  }
+
+  /// Returns true if it is at/after configured notification time and today's commute decision is pending
   /// (i.e. neither Kept nor Discarded yet, and no commute items exist for today).
   bool shouldPromptReview(ExpenseProvider provider) {
     if (!_config.enabled) return false;
 
     final now = DateTime.now();
-    // Only prompt after 9:30 AM
-    final isAfter930 = now.hour > _config.notifyHour ||
+    // Only prompt after configured notification time
+    final isAfterNotifyTime = now.hour > _config.notifyHour ||
         (now.hour == _config.notifyHour && now.minute >= _config.notifyMinute);
-    if (!isAfter930) return false;
+    if (!isAfterNotifyTime) return false;
 
     final todayStr = DateFormat('yyyy-MM-dd').format(now);
     // If user already made a decision (keep or discard) today, don't prompt again
@@ -215,7 +279,7 @@ class CommuteAutomationService {
     return true;
   }
 
-  /// Schedules daily 9:30 AM review notification.
+  /// Schedules daily review notification with configured time and items.
   /// Does NOT auto-insert at 7:00 AM. Insertion only happens when "Keep" is clicked.
   Future<bool> checkAndApplyDailyCommute(ExpenseProvider provider) async {
     if (!_config.enabled) return false;
@@ -224,13 +288,19 @@ class CommuteAutomationService {
     final todayStr = DateFormat('yyyy-MM-dd').format(now);
     final batchId = 'commute_$todayStr';
 
-    // Schedule 9:30 AM review notification
+    final summaryStr = _config.items.isEmpty
+        ? 'No items'
+        : _config.items
+            .map((i) => '${i.description} (৳${i.amount.toInt() == i.amount ? i.amount.toInt() : i.amount})')
+            .join(' & ');
+
+    // Schedule review notification at user-configured time
     await NotificationService().scheduleCommuteNotification(
       batchId: batchId,
       hour: _config.notifyHour,
       minute: _config.notifyMinute,
       title: 'Daily Commute Review',
-      body: 'Review today\'s commute: CNG (৳80) & Metro (৳36). Tap to keep or discard.',
+      body: 'Review today\'s commute: $summaryStr. Tap to keep or discard.',
     );
 
     return shouldPromptReview(provider);

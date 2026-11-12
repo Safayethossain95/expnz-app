@@ -1,13 +1,16 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:expnz/models/commute_rule.dart';
 import 'package:expnz/models/expense_model.dart';
 import 'package:expnz/providers/expense_provider.dart';
+import 'package:expnz/services/commute_automation_service.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUp(() {
     SharedPreferences.setMockInitialValues({});
+    CommuteAutomationService().resetForTesting();
   });
 
   group('Expense Tracker Taka & SL Column Tests', () {
@@ -232,6 +235,119 @@ void main() {
       expect(csv.contains('1,'), isTrue);
       expect(csv.contains('Lunch'), isTrue);
       expect(csv.contains('150'), isTrue);
+    });
+
+    test('Monthly Distribution: Export to next month adds from beginning when next month has no entries, and appends when it does', () async {
+      final provider = ExpenseProvider();
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      provider.setFilterMode(DateFilterMode.monthlyDistribution);
+
+      // Add 2 entries to current monthly distribution period
+      await provider.addNewRow(
+        category: ExpenseCategory.bills,
+        description: 'Internet Bill',
+        amount: 1000.0,
+      );
+      await provider.addNewRow(
+        category: ExpenseCategory.food,
+        description: 'Monthly Ration',
+        amount: 4500.0,
+      );
+
+      expect(provider.activeExpenses.length, 2);
+
+      // Select both rows
+      final items = provider.activeExpenses;
+      provider.toggleRowSelection(items[0].id);
+      provider.toggleRowSelection(items[1].id);
+      expect(provider.selectedMonthlyDistributionIds.length, 2);
+
+      final currentPeriod = provider.selectedMonthlyDistributionPeriod;
+      final nextPeriod = provider.nextMonthlyDistributionPeriod;
+
+      // 1. Export to next month (which has NO entries initially)
+      final exportedCount = await provider.exportSelectedToNextMonth();
+      expect(exportedCount, 2);
+      expect(provider.selectedMonthlyDistributionIds.isEmpty, isTrue);
+
+      // Switch to next month period and verify entries are added from beginning
+      provider.setSelectedMonthlyDistributionPeriod(nextPeriod);
+      expect(provider.activeExpenses.length, 2);
+      expect(provider.activeExpenses[0].description, 'Internet Bill');
+      expect(provider.activeExpenses[0].amount, 1000.0);
+      expect(provider.activeExpenses[1].description, 'Monthly Ration');
+      expect(provider.activeExpenses[1].amount, 4500.0);
+
+      // 2. Now add a new entry to next month
+      await provider.addNewRow(
+        category: ExpenseCategory.shopping,
+        description: 'Next Month Clothes',
+        amount: 2000.0,
+      );
+      expect(provider.activeExpenses.length, 3);
+      expect(provider.activeExpenses[2].description, 'Next Month Clothes');
+
+      // 3. Switch back to first period, select 1 entry, and export again
+      provider.setSelectedMonthlyDistributionPeriod(currentPeriod);
+      provider.toggleRowSelection(provider.activeExpenses[0].id); // select 'Internet Bill'
+      expect(provider.selectedMonthlyDistributionIds.length, 1);
+
+      final secondExportCount = await provider.exportSelectedToNextMonth();
+      expect(secondExportCount, 1);
+
+      // Switch to next period again and verify entry is APPENDED after existing 3 entries
+      provider.setSelectedMonthlyDistributionPeriod(nextPeriod);
+      expect(provider.activeExpenses.length, 4);
+      expect(provider.activeExpenses[0].description, 'Internet Bill');
+      expect(provider.activeExpenses[1].description, 'Monthly Ration');
+      expect(provider.activeExpenses[2].description, 'Next Month Clothes');
+      expect(provider.activeExpenses[3].description, 'Internet Bill'); // appended at the end!
+    });
+
+    test('Daily Commute Customization: User can set custom notification time and customize morning entries', () async {
+      final commuteService = CommuteAutomationService();
+      await commuteService.loadConfig();
+
+      // 1. Update notification time to 8:15 AM
+      await commuteService.updateNotifyTime(8, 15);
+      expect(commuteService.config.notifyHour, 8);
+      expect(commuteService.config.notifyMinute, 15);
+
+      // 2. Customize entries that will be inserted every morning
+      final customEntries = [
+        const CommuteItemTemplate(
+          category: ExpenseCategory.travel,
+          description: 'Uber Ride',
+          amount: 250.0,
+        ),
+        const CommuteItemTemplate(
+          category: ExpenseCategory.food,
+          description: 'Morning Coffee',
+          amount: 120.0,
+        ),
+      ];
+      await commuteService.updateItems(customEntries);
+      expect(commuteService.config.items.length, 2);
+      expect(commuteService.config.items[0].description, 'Uber Ride');
+      expect(commuteService.config.items[0].amount, 250.0);
+      expect(commuteService.config.items[1].description, 'Morning Coffee');
+      expect(commuteService.config.items[1].amount, 120.0);
+
+      // 3. Keep batch inserts the customized items into today's expenses
+      final provider = ExpenseProvider();
+      await Future.delayed(const Duration(milliseconds: 100));
+      provider.setFilterMode(DateFilterMode.today);
+
+      const batchId = 'test_custom_commute_batch';
+      await commuteService.keepBatch(batchId, provider);
+
+      expect(provider.totalSpent, 370.0); // 250 + 120
+      expect(provider.totalEntriesCount, 2);
+      expect(provider.activeExpenses.any((e) => e.description == 'Uber Ride' && e.amount == 250.0), isTrue);
+      expect(provider.activeExpenses.any((e) => e.description == 'Morning Coffee' && e.amount == 120.0), isTrue);
+
+      CommuteAutomationService().resetForTesting();
     });
   });
 }

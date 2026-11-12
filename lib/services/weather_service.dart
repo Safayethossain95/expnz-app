@@ -37,6 +37,8 @@ class WeatherService {
   static const double defaultLongitude = 90.4125;
 
   static const String _prefKeyWeatherEnabled = 'expnz_weather_enabled_v1';
+  static const String _prefKeyWeatherHour = 'expnz_weather_hour_v1';
+  static const String _prefKeyWeatherMinute = 'expnz_weather_minute_v1';
   static const String _prefKeyWeatherCacheDate = 'expnz_weather_cache_date_v1';
   static const String _prefKeyWeatherCacheData = 'expnz_weather_cache_data_v1';
 
@@ -60,11 +62,20 @@ class WeatherService {
   bool _isNotificationEnabled = true;
   bool get isNotificationEnabled => _isNotificationEnabled;
 
-  /// Loads notification preference from local storage and optionally syncs with Cloud Firestore
+  int _notificationHour = 9;
+  int _notificationMinute = 0;
+  int get notificationHour => _notificationHour;
+  int get notificationMinute => _notificationMinute;
+
+  /// Loads notification preference and scheduled time from local storage and optionally syncs with Cloud Firestore
   Future<bool> loadNotificationEnabled({bool syncWithCloud = false}) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       _isNotificationEnabled = prefs.getBool(_prefKeyWeatherEnabled) ?? true;
+      _notificationHour = prefs.getInt(_prefKeyWeatherHour) ?? 9;
+      _notificationMinute = prefs.getInt(_prefKeyWeatherMinute) ?? 0;
+      _notificationHour = prefs.getInt(_prefKeyWeatherHour) ?? 9;
+      _notificationMinute = prefs.getInt(_prefKeyWeatherMinute) ?? 0;
 
       if (syncWithCloud && Firebase.apps.isNotEmpty) {
         final user = FirebaseAuth.instance.currentUser;
@@ -80,6 +91,16 @@ class WeatherService {
             if (cloudEnabled != null) {
               _isNotificationEnabled = cloudEnabled;
               await prefs.setBool(_prefKeyWeatherEnabled, cloudEnabled);
+            }
+            final cloudHour = doc.data()!['hour'] as int?;
+            if (cloudHour != null) {
+              _notificationHour = cloudHour;
+              await prefs.setInt(_prefKeyWeatherHour, cloudHour);
+            }
+            final cloudMinute = doc.data()!['minute'] as int?;
+            if (cloudMinute != null) {
+              _notificationMinute = cloudMinute;
+              await prefs.setInt(_prefKeyWeatherMinute, cloudMinute);
             }
           }
         }
@@ -115,6 +136,45 @@ class WeatherService {
         debugPrint('Error saving cloud weather settings: $e');
       }
     }
+
+    if (enabled) {
+      await checkAndApplyLocalMorningWeather();
+    } else {
+      await NotificationService().cancelNotification(2001);
+    }
+  }
+
+  /// Sets notification time locally and syncs to Cloud Firestore
+  Future<void> setNotificationTime(int hour, int minute) async {
+    _notificationHour = hour;
+    _notificationMinute = minute;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_prefKeyWeatherHour, hour);
+    await prefs.setInt(_prefKeyWeatherMinute, minute);
+
+    if (Firebase.apps.isNotEmpty) {
+      try {
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .collection('settings')
+              .doc('weather_automation')
+              .set({
+            'hour': hour,
+            'minute': minute,
+            'updatedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+        }
+      } catch (e) {
+        debugPrint('Error saving cloud weather time: $e');
+      }
+    }
+
+    if (_isNotificationEnabled) {
+      await checkAndApplyLocalMorningWeather();
+    }
   }
 
   String get apiKey =>
@@ -139,6 +199,8 @@ class WeatherService {
     try {
       final prefs = await SharedPreferences.getInstance();
       _isNotificationEnabled = prefs.getBool(_prefKeyWeatherEnabled) ?? true;
+      _notificationHour = prefs.getInt(_prefKeyWeatherHour) ?? 9;
+      _notificationMinute = prefs.getInt(_prefKeyWeatherMinute) ?? 0;
 
       final cachedDate = prefs.getString(_prefKeyWeatherCacheDate);
       if (cachedDate == todayStr) {
@@ -465,11 +527,11 @@ class WeatherService {
       }
     }
 
-    // 2. Schedule the 9 AM weather notification with today's summary
+    // 2. Schedule the morning weather notification with today's summary at user configured time
     final summary = _sessionSummary ?? generateSummary(hours);
     await NotificationService().scheduleWeatherNotification(
-      hour: 9,
-      minute: 0,
+      hour: _notificationHour,
+      minute: _notificationMinute,
       title: summary.title,
       body: summary.body.isNotEmpty
           ? summary.body

@@ -1,15 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:expnz/providers/expense_provider.dart';
 import 'package:expnz/screens/home_screen.dart';
+import 'package:expnz/services/commute_automation_service.dart';
 import 'package:expnz/theme/app_theme.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  setUp(() {
+  setUp(() async {
     SharedPreferences.setMockInitialValues({});
+    await CommuteAutomationService().saveConfig(
+      CommuteAutomationService().config.copyWith(
+        lastDecisionDate: DateFormat('yyyy-MM-dd').format(DateTime.now()),
+      ),
+    );
   });
 
   testWidgets('HomeScreen renders SL, CATEGORY, DESCRIPTION, AMOUNT in Taka with 0 launch state',

@@ -62,10 +62,14 @@ class ExpenseProvider extends ChangeNotifier {
   MonthPeriod? get selectedExpenseMonthPeriod => _selectedExpenseMonthPeriod;
 
   List<MonthPeriod> get availableMonthPeriods {
-    final periods = _monthStartService.generatePeriods(count: 24, futureCount: 2);
+    final periods = _monthStartService.generatePeriods(count: 24, futureCount: 6);
     if (_selectedMonthlyDistributionPeriod != null &&
         !periods.contains(_selectedMonthlyDistributionPeriod)) {
       periods.insert(0, _selectedMonthlyDistributionPeriod!);
+    }
+    final nextP = nextMonthlyDistributionPeriod;
+    if (!periods.contains(nextP)) {
+      periods.insert(0, nextP);
     }
     return periods;
   }
@@ -534,6 +538,13 @@ class ExpenseProvider extends ChangeNotifier {
     return movedCount;
   }
 
+  /// Exports selected monthly distribution items into the next month's distribution.
+  /// If next month already has entries, appends them after the existing entries of next month.
+  /// If next month has no entries, inserts them from the beginning.
+  Future<int> exportSelectedToNextMonth() async {
+    return copySelectedToNextMonth();
+  }
+
   /// Copies selected monthly distribution items into the next month's distribution.
   /// If next month already has entries, appends them after the existing entries of next month.
   /// If next month has no entries, inserts them from the beginning.
@@ -558,14 +569,27 @@ class ExpenseProvider extends ChangeNotifier {
             nextPeriod.contains(e.date ?? e.createdAt))
         .toList();
 
-    // Prepare copies with date set to nextPeriod.start and unique IDs
+    // Prepare copies with date set to nextPeriod.start (or matching relative day if valid) and unique IDs
     final now = DateTime.now();
     final copiedItems = <ExpenseItem>[];
     for (int i = 0; i < selectedItems.length; i++) {
       final original = selectedItems[i];
+      DateTime itemDate = nextPeriod.start;
+      if (original.date != null) {
+        final orig = original.date!;
+        final newYear = orig.month == 12 ? orig.year + 1 : orig.year;
+        final newMonth = orig.month == 12 ? 1 : orig.month + 1;
+        final maxDays = DateTime(newYear, newMonth + 1, 0).day;
+        final newDay = orig.day.clamp(1, maxDays);
+        final candidate = DateTime(newYear, newMonth, newDay, orig.hour, orig.minute, orig.second);
+        if (nextPeriod.contains(candidate)) {
+          itemDate = candidate;
+        }
+      }
+
       copiedItems.add(ExpenseItem(
         id: _repository.createNewBlankItem().id,
-        date: nextPeriod.start,
+        date: itemDate,
         category: original.category,
         description: original.description,
         amount: original.amount,
@@ -589,8 +613,21 @@ class ExpenseProvider extends ChangeNotifier {
         _monthlyDistributionExpenses.addAll(copiedItems);
       }
     } else {
-      // If no values exist in next month, insert from the beginning
-      _monthlyDistributionExpenses.addAll(copiedItems);
+      // If no values exist in next month, insert from the beginning of next month
+      int insertIndex = -1;
+      for (int i = 0; i < _monthlyDistributionExpenses.length; i++) {
+        final item = _monthlyDistributionExpenses[i];
+        final itemDate = item.date ?? item.createdAt;
+        if (itemDate.isAfter(nextPeriod.end) || itemDate.isAtSameMomentAs(nextPeriod.end)) {
+          insertIndex = i;
+          break;
+        }
+      }
+      if (insertIndex != -1) {
+        _monthlyDistributionExpenses.insertAll(insertIndex, copiedItems);
+      } else {
+        _monthlyDistributionExpenses.addAll(copiedItems);
+      }
     }
 
     final count = copiedItems.length;

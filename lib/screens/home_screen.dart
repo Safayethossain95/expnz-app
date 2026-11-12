@@ -90,8 +90,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _schedule930CommuteTimer() {
     _commute930Timer?.cancel();
+    final config = CommuteAutomationService().config;
     final now = DateTime.now();
-    final target = DateTime(now.year, now.month, now.day, 9, 30);
+    final target = DateTime(now.year, now.month, now.day, config.notifyHour, config.notifyMinute);
     if (now.isBefore(target)) {
       final diff = target.difference(now);
       _commute930Timer = Timer(diff, () {
@@ -345,13 +346,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  void _openProfileScreen(BuildContext context) {
-    Navigator.push(
+  void _openProfileScreen(BuildContext context) async {
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => ProfileScreen(provider: provider),
       ),
     );
+    if (mounted) {
+      _schedule930CommuteTimer();
+      _checkAndShowCommuteReview();
+    }
   }
 
   void _showOptionsMenu(BuildContext context) {
@@ -718,7 +723,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                   ],
                                   if (provider.selectedMonthlyDistributionIds.isNotEmpty) ...[
                                     const SizedBox(height: 10),
-                                    _buildCopyToNextMonthBar(context, provider),
+                                    _buildExportToNextMonthBar(context, provider),
                                   ],
                                   const SizedBox(height: 14),
                                 ],
@@ -1110,7 +1115,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildCopyToNextMonthBar(BuildContext context, ExpenseProvider provider) {
+  Widget _buildExportToNextMonthBar(BuildContext context, ExpenseProvider provider) {
     final count = provider.selectedMonthlyDistributionIds.length;
     final nextPeriod = provider.nextMonthlyDistributionPeriod;
 
@@ -1137,8 +1142,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               shape: BoxShape.circle,
             ),
             child: const Icon(
-              Icons.content_copy_rounded,
-              size: 15,
+              Icons.drive_file_move_rounded,
+              size: 16,
               color: Colors.white,
             ),
           ),
@@ -1149,7 +1154,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  '$count ${count == 1 ? 'item' : 'items'} selected',
+                  '$count ${count == 1 ? 'entry' : 'entries'} selected',
                   style: const TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
@@ -1160,7 +1165,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   'Next: ${nextPeriod.label}',
                   style: TextStyle(
                     fontSize: 11,
-                    color: Colors.white.withValues(alpha: 0.8),
+                    color: Colors.white.withValues(alpha: 0.85),
                     fontWeight: FontWeight.w500,
                   ),
                   overflow: TextOverflow.ellipsis,
@@ -1170,13 +1175,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
           ElevatedButton.icon(
             onPressed: () async {
-              final copied = await provider.copySelectedToNextMonth();
+              final exported = await provider.exportSelectedToNextMonth();
               if (context.mounted) {
                 ScaffoldMessenger.of(context).clearSnackBars();
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text(
-                      'Successfully copied $copied ${copied == 1 ? 'item' : 'items'} to ${nextPeriod.label}',
+                      'Successfully exported $exported ${exported == 1 ? 'entry' : 'entries'} to ${nextPeriod.label}',
                       style: const TextStyle(fontWeight: FontWeight.w600),
                     ),
                     backgroundColor: AppColors.forestGreen,
@@ -1195,7 +1200,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             },
             icon: const Icon(Icons.arrow_forward_rounded, size: 14),
             label: const Text(
-              'Copy to next month',
+              'Export to next month',
               style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
             ),
             style: ElevatedButton.styleFrom(

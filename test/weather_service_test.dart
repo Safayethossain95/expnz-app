@@ -148,5 +148,16 @@ void main() {
       final cachedAgain = await weatherService.getCachedOrFetchForecast();
       expect(identical(cachedHours, cachedAgain), isTrue);
     });
+
+    test('Customizable weather notification time persists and loads properly', () async {
+      SharedPreferences.setMockInitialValues({});
+      await weatherService.setNotificationTime(8, 30);
+      expect(weatherService.notificationHour, 8);
+      expect(weatherService.notificationMinute, 30);
+
+      await weatherService.loadNotificationEnabled();
+      expect(weatherService.notificationHour, 8);
+      expect(weatherService.notificationMinute, 30);
+    });
   });
 }

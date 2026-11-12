@@ -1,13 +1,17 @@
 import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import '../models/commute_rule.dart';
+import '../models/expense_model.dart';
 import '../providers/expense_provider.dart';
 import '../services/auth_service.dart';
+import '../services/commute_automation_service.dart';
 import '../services/month_start_service.dart';
+import '../services/notification_service.dart';
 import '../services/pin_lock_service.dart';
 import '../services/weather_service.dart';
 import '../theme/app_theme.dart';
-import '../widgets/commute_settings_dialog.dart';
+import '../widgets/commute_review_dialog.dart';
 import '../widgets/set_pin_dialog.dart';
 import '../widgets/weather_forecast_dialog.dart';
 
@@ -24,6 +28,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final AuthService _authService = AuthService();
   final PinLockService _pinService = PinLockService();
   final WeatherService _weatherService = WeatherService();
+  final CommuteAutomationService _commuteService = CommuteAutomationService();
 
   bool _isPinSet = false;
   bool _isWeatherEnabled = false;
@@ -50,8 +55,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final user = _authService.currentUser;
     final results = await Future.wait([
       _pinService.isPinEnabled(userId: user?.uid),
-      _weatherService.loadNotificationEnabled(),
+      _weatherService.loadNotificationEnabled(syncWithCloud: true),
       MonthStartService().load(),
+      _commuteService.loadConfig(),
     ]);
 
     if (mounted) {
@@ -586,60 +592,624 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  String _formatTime12(int hour, int minute) {
+    final period = hour >= 12 ? 'PM' : 'AM';
+    final hour12 = hour % 12 == 0 ? 12 : hour % 12;
+    final minuteStr = minute.toString().padLeft(2, '0');
+    return '$hour12:$minuteStr $period';
+  }
+
+  Future<void> _showAddEditCommuteItemDialog({
+    CommuteItemTemplate? initialItem,
+    int? editIndex,
+  }) async {
+    ExpenseCategory selectedCategory = initialItem?.category ?? ExpenseCategory.travel;
+    final descController = TextEditingController(text: initialItem?.description ?? '');
+    final amountController = TextEditingController(
+      text: initialItem != null
+          ? (initialItem.amount.toInt() == initialItem.amount
+              ? initialItem.amount.toInt().toString()
+              : initialItem.amount.toString())
+          : '',
+    );
+    final formKey = GlobalKey<FormState>();
+
+    await showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return AlertDialog(
+              backgroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+              contentPadding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+              actionsPadding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+              title: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: AppColors.mintBadgeBg,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.commute_rounded, color: AppColors.forestGreen, size: 20),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    initialItem == null ? 'Add Commute Entry' : 'Edit Commute Entry',
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                  ),
+                ],
+              ),
+              content: SingleChildScrollView(
+                child: Form(
+                  key: formKey,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'CATEGORY',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.textMuted,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: ExpenseCategory.values.map((cat) {
+                          final isSelected = cat == selectedCategory;
+                          return ChoiceChip(
+                            label: Text(
+                              cat.label,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                                color: isSelected ? Colors.white : AppColors.textDark,
+                              ),
+                            ),
+                            selected: isSelected,
+                            selectedColor: AppColors.forestGreen,
+                            backgroundColor: const Color(0xFFF1F5F9),
+                            onSelected: (val) {
+                              if (val) {
+                                setDialogState(() => selectedCategory = cat);
+                              }
+                            },
+                          );
+                        }).toList(),
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'DESCRIPTION',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.textMuted,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      TextFormField(
+                        controller: descController,
+                        decoration: InputDecoration(
+                          hintText: 'e.g. CNG vara, Metro, Bus fare',
+                          hintStyle: const TextStyle(fontSize: 13, color: AppColors.placeholderText),
+                          filled: true,
+                          fillColor: const Color(0xFFF9FAFB),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: AppColors.tableBorder),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: AppColors.tableBorder),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: AppColors.forestGreen, width: 1.5),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        ),
+                        validator: (val) {
+                          if (val == null || val.trim().isEmpty) {
+                            return 'Please enter description';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'AMOUNT (BDT)',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.textMuted,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      TextFormField(
+                        controller: amountController,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        decoration: InputDecoration(
+                          prefixText: '৳ ',
+                          prefixStyle: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.textDark),
+                          hintText: '0.00',
+                          hintStyle: const TextStyle(fontSize: 13, color: AppColors.placeholderText),
+                          filled: true,
+                          fillColor: const Color(0xFFF9FAFB),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: AppColors.tableBorder),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: AppColors.tableBorder),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: AppColors.forestGreen, width: 1.5),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        ),
+                        validator: (val) {
+                          if (val == null || val.trim().isEmpty) {
+                            return 'Please enter amount';
+                          }
+                          final parsed = double.tryParse(val.trim());
+                          if (parsed == null || parsed <= 0) {
+                            return 'Enter a valid positive amount';
+                          }
+                          return null;
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogCtx),
+                  child: const Text('Cancel', style: TextStyle(color: AppColors.textMuted)),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    if (formKey.currentState?.validate() ?? false) {
+                      final desc = descController.text.trim();
+                      final amount = double.parse(amountController.text.trim());
+                      final newTemplate = CommuteItemTemplate(
+                        category: selectedCategory,
+                        description: desc,
+                        amount: amount,
+                      );
+
+                      final currentItems = List<CommuteItemTemplate>.from(_commuteService.config.items);
+                      if (editIndex != null && editIndex >= 0 && editIndex < currentItems.length) {
+                        currentItems[editIndex] = newTemplate;
+                      } else {
+                        currentItems.add(newTemplate);
+                      }
+
+                      await _commuteService.updateItems(currentItems);
+                      if (mounted) setState(() {});
+                      if (dialogCtx.mounted) Navigator.pop(dialogCtx);
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.forestGreen,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  child: Text(initialItem == null ? 'Add Entry' : 'Save Changes'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _deleteCommuteItem(int index) async {
+    final currentItems = List<CommuteItemTemplate>.from(_commuteService.config.items);
+    if (index >= 0 && index < currentItems.length) {
+      final item = currentItems[index];
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Remove Entry?', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          content: Text('Remove "${item.description}" from morning commute entries?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFDC2626),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Remove'),
+            ),
+          ],
+        ),
+      );
+      if (confirm == true) {
+        currentItems.removeAt(index);
+        await _commuteService.updateItems(currentItems);
+        if (mounted) setState(() {});
+      }
+    }
+  }
+
+  Future<void> _testCommuteSimulation() async {
+    final now = DateTime.now();
+    final testBatchId = 'test_commute_${now.millisecondsSinceEpoch}';
+    final items = _commuteService.config.items;
+
+    final testItems = items.map((t) {
+      return ExpenseItem(
+        id: 'test-${DateTime.now().microsecondsSinceEpoch}-${t.description}',
+        date: now,
+        category: t.category,
+        description: t.description,
+        amount: t.amount,
+        isPlaceholder: false,
+        createdAt: DateTime.now(),
+        batchId: testBatchId,
+      );
+    }).toList();
+
+    await widget.provider.addExpenseItems(testItems);
+
+    final summaryStr = items.isEmpty
+        ? 'No items'
+        : items
+            .map((i) => '${i.description} (৳${i.amount.toInt() == i.amount ? i.amount.toInt() : i.amount})')
+            .join(' & ');
+
+    await NotificationService().showCommuteNotification(
+      batchId: testBatchId,
+      title: 'Daily Commute Entry Added',
+      body: 'Data entry successful: $summaryStr. Tap to keep or discard.',
+    );
+
+    if (mounted) {
+      CommuteReviewDialog.show(
+        context,
+        batchId: testBatchId,
+        provider: widget.provider,
+      );
+    }
+  }
+
   Widget _buildCommuteCard() {
+    final config = _commuteService.config;
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFF9FAFB),
+        color: config.enabled ? const Color(0xFFF0FDF4) : const Color(0xFFF9FAFB),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
+        border: Border.all(
+          color: config.enabled ? const Color(0xFFBBF7D0) : const Color(0xFFE5E7EB),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.commute_rounded, size: 19, color: AppColors.forestGreen),
+              Icon(
+                Icons.commute_rounded,
+                size: 19,
+                color: config.enabled ? AppColors.forestGreen : AppColors.textMuted,
+              ),
               const SizedBox(width: 8),
-              const Expanded(
+              Expanded(
                 child: Text(
                   'Daily Commute Routine',
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
-                    color: AppColors.textDark,
+                    color: config.enabled ? AppColors.textDark : AppColors.textMuted,
                   ),
                 ),
               ),
-              TextButton(
-                onPressed: () {
-                  CommuteSettingsDialog.show(context, widget.provider);
-                },
-                style: TextButton.styleFrom(
-                  padding: EdgeInsets.zero,
-                  minimumSize: const Size(64, 28),
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                child: const Text(
-                  'Configure',
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.forestGreen,
-                  ),
+              Transform.scale(
+                scale: 0.8,
+                child: Switch.adaptive(
+                  value: config.enabled,
+                  activeTrackColor: AppColors.forestGreen,
+                  onChanged: (val) async {
+                    await _commuteService.setEnabled(val);
+                    if (mounted) setState(() {});
+                  },
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 4),
-          const Text(
-            '9:30 AM prompt to review & insert CNG (৳80) & Metro (৳36).',
-            style: TextStyle(
+          const SizedBox(height: 2),
+          Text(
+            config.enabled
+                ? 'Review prompt and auto-insert default entries every morning.'
+                : 'Commute automation disabled. Turn on to resume morning reminders.',
+            style: const TextStyle(
               fontSize: 12,
               color: AppColors.textMuted,
               height: 1.3,
             ),
           ),
+          if (config.enabled) ...[
+            const SizedBox(height: 12),
+
+            // 1. Commute Notification Time Row
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFE5E7EB)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.alarm_rounded, size: 17, color: AppColors.forestGreen),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Commute Notification Time',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textDark,
+                      ),
+                    ),
+                  ),
+                  InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () async {
+                      final picked = await showTimePicker(
+                        context: context,
+                        initialTime: TimeOfDay(
+                          hour: config.notifyHour,
+                          minute: config.notifyMinute,
+                        ),
+                      );
+                      if (picked != null) {
+                        await _commuteService.updateNotifyTime(picked.hour, picked.minute);
+                        if (mounted) {
+                          setState(() {});
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'Commute notification time set to ${_formatTime12(picked.hour, picked.minute)}',
+                              ),
+                              backgroundColor: AppColors.forestGreen,
+                              behavior: SnackBarBehavior.floating,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                          );
+                        }
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: AppColors.forestGreen.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _formatTime12(config.notifyHour, config.notifyMinute),
+                            style: const TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.forestGreen,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          const Icon(Icons.edit_rounded, size: 13, color: AppColors.forestGreen),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+
+            // 2. Default Morning Commute Entries Header
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    const Text(
+                      'Default Morning Entries',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textDark,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppColors.mintBadgeBg,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        '${config.items.length}',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.forestGreen,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                TextButton.icon(
+                  onPressed: () => _showAddEditCommuteItemDialog(),
+                  icon: const Icon(Icons.add_circle_outline_rounded, size: 15, color: AppColors.forestGreen),
+                  label: const Text(
+                    'Add Entry',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.forestGreen,
+                    ),
+                  ),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+
+            // 3. Entries List
+            if (config.items.isEmpty)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFE5E7EB)),
+                ),
+                child: const Center(
+                  child: Text(
+                    'No morning commute entries configured.\nTap "+ Add Entry" to customize what gets inserted.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12, color: AppColors.textMuted, height: 1.3),
+                  ),
+                ),
+              )
+            else
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFE5E7EB)),
+                ),
+                child: Column(
+                  children: [
+                    for (int i = 0; i < config.items.length; i++) ...[
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: config.items[i].category.bgColor,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                config.items[i].category.label,
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: config.items[i].category.textColor,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                config.items[i].description,
+                                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                              ),
+                            ),
+                            Text(
+                              formatCurrency(config.items[i].amount),
+                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                            ),
+                            const SizedBox(width: 4),
+                            IconButton(
+                              icon: const Icon(Icons.edit_outlined, size: 16, color: AppColors.textMuted),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                              tooltip: 'Edit entry',
+                              onPressed: () => _showAddEditCommuteItemDialog(
+                                initialItem: config.items[i],
+                                editIndex: i,
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline_rounded, size: 16, color: Color(0xFFDC2626)),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                              tooltip: 'Delete entry',
+                              onPressed: () => _deleteCommuteItem(i),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (i < config.items.length - 1)
+                        const Divider(height: 1, color: Color(0xFFF3F4F6)),
+                    ],
+                    // Summary Footer Row
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFF9FAFB),
+                        borderRadius: BorderRadius.vertical(bottom: Radius.circular(12)),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Total per Morning:',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textMuted),
+                          ),
+                          Text(
+                            formatCurrency(config.items.fold(0.0, (sum, item) => sum + item.amount)),
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.forestGreen,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 12),
+
+            // 4. Test Simulation Button
+            SizedBox(
+              width: double.infinity,
+              height: 36,
+              child: OutlinedButton.icon(
+                onPressed: _testCommuteSimulation,
+                icon: const Icon(Icons.play_arrow_rounded, size: 16),
+                label: const Text(
+                  'Simulate Notification & Review Modal',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.forestGreen,
+                  side: const BorderSide(color: AppColors.forestGreen),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -672,7 +1242,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  '9:00 AM Weather Alert',
+                  'Weather Alert',
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
@@ -694,21 +1264,108 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ],
           ),
           const SizedBox(height: 2),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  _isWeatherEnabled
-                      ? 'Delivering at 9:00 AM with temperature & rain prediction.'
-                      : 'Weather push notifications disabled. Turn on to resume.',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: AppColors.textMuted,
-                    height: 1.3,
+          Text(
+            _isWeatherEnabled
+                ? 'Delivers daily morning temperature & rain forecast alerts.'
+                : 'Weather push notifications disabled. Turn on to resume.',
+            style: const TextStyle(
+              fontSize: 12,
+              color: AppColors.textMuted,
+              height: 1.3,
+            ),
+          ),
+          if (_isWeatherEnabled) ...[
+            const SizedBox(height: 12),
+
+            // Weather Notification Time Row
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.orange.withValues(alpha: 0.2)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.schedule_rounded, size: 17, color: Colors.orange),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Weather Notification Time',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textDark,
+                      ),
+                    ),
+                  ),
+                  InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () async {
+                      final picked = await showTimePicker(
+                        context: context,
+                        initialTime: TimeOfDay(
+                          hour: _weatherService.notificationHour,
+                          minute: _weatherService.notificationMinute,
+                        ),
+                      );
+                      if (picked != null) {
+                        await _weatherService.setNotificationTime(picked.hour, picked.minute);
+                        if (mounted) {
+                          setState(() {});
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'Weather alert time set to ${_formatTime12(picked.hour, picked.minute)}',
+                              ),
+                              backgroundColor: Colors.orange.shade800,
+                              behavior: SnackBarBehavior.floating,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                          );
+                        }
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _formatTime12(_weatherService.notificationHour, _weatherService.notificationMinute),
+                            style: const TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.orange,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          const Icon(Icons.edit_rounded, size: 13, color: Colors.orange),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Delivering at ${_formatTime12(_weatherService.notificationHour, _weatherService.notificationMinute)} with rain prediction.',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.textMuted,
+                      height: 1.3,
+                    ),
                   ),
                 ),
-              ),
-              if (_isWeatherEnabled)
                 TextButton(
                   onPressed: () {
                     WeatherForecastDialog.show(context);
@@ -727,8 +1384,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ),
                 ),
-            ],
-          ),
+              ],
+            ),
+          ],
         ],
       ),
     );

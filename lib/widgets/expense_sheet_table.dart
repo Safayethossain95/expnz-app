@@ -78,13 +78,13 @@ class ExpenseSheetTable extends StatelessWidget {
                                 width: 22,
                                 child: Center(
                                   child: InkWell(
-                                    borderRadius: BorderRadius.circular(11),
+                                    borderRadius: BorderRadius.circular(6),
                                     onTap: () => provider.selectAllMonthlyDistributionRows(),
                                     child: Container(
                                       width: 18,
                                       height: 18,
                                       decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
+                                        borderRadius: BorderRadius.circular(5),
                                         color: (provider.selectedMonthlyDistributionIds.isNotEmpty &&
                                                 provider.selectedMonthlyDistributionIds.containsAll(
                                                     provider.activeExpenses.map((e) => e.id)))
@@ -102,7 +102,7 @@ class ExpenseSheetTable extends StatelessWidget {
                                       child: (provider.selectedMonthlyDistributionIds.isNotEmpty &&
                                               provider.selectedMonthlyDistributionIds.containsAll(
                                                   provider.activeExpenses.map((e) => e.id)))
-                                          ? const Icon(Icons.check_rounded, size: 12, color: Colors.white)
+                                          ? const Icon(Icons.check_rounded, size: 13, color: Colors.white)
                                           : null,
                                     ),
                                   ),
@@ -221,13 +221,13 @@ class ExpenseSheetTable extends StatelessWidget {
                                         child: Center(
                                           child: !item.isPlaceholder
                                               ? InkWell(
-                                                  borderRadius: BorderRadius.circular(11),
+                                                  borderRadius: BorderRadius.circular(6),
                                                   onTap: () => provider.toggleRowSelection(item.id),
                                                   child: Container(
                                                     width: 18,
                                                     height: 18,
                                                     decoration: BoxDecoration(
-                                                      shape: BoxShape.circle,
+                                                      borderRadius: BorderRadius.circular(5),
                                                       color: provider.isRowSelected(item.id)
                                                           ? AppColors.forestGreen
                                                           : Colors.transparent,
@@ -241,7 +241,7 @@ class ExpenseSheetTable extends StatelessWidget {
                                                     child: provider.isRowSelected(item.id)
                                                         ? const Icon(
                                                             Icons.check_rounded,
-                                                            size: 12,
+                                                            size: 13,
                                                             color: Colors.white,
                                                           )
                                                         : null,
