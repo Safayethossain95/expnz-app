@@ -1116,112 +1116,46 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildExportToNextMonthBar(BuildContext context, ExpenseProvider provider) {
-    final count = provider.selectedMonthlyDistributionIds.length;
     final nextPeriod = provider.nextMonthlyDistributionPeriod;
 
-    return Container(
+    return SizedBox(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: AppColors.forestGreen,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.forestGreen.withValues(alpha: 0.25),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.16),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(
-              Icons.drive_file_move_rounded,
-              size: 16,
-              color: Colors.white,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  '$count ${count == 1 ? 'entry' : 'entries'} selected',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white,
-                  ),
+      height: 46,
+      child: ElevatedButton(
+        onPressed: () async {
+          final exported = await provider.exportSelectedToNextMonth();
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).clearSnackBars();
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  'Successfully exported $exported ${exported == 1 ? 'entry' : 'entries'} to ${nextPeriod.label}',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
-                Text(
-                  'Next: ${nextPeriod.label}',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.white.withValues(alpha: 0.85),
-                    fontWeight: FontWeight.w500,
-                  ),
-                  overflow: TextOverflow.ellipsis,
+                backgroundColor: AppColors.forestGreen,
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                action: SnackBarAction(
+                  label: 'View',
+                  textColor: Colors.white,
+                  onPressed: () {
+                    provider.setSelectedMonthlyDistributionPeriod(nextPeriod);
+                  },
                 ),
-              ],
-            ),
-          ),
-          ElevatedButton.icon(
-            onPressed: () async {
-              final exported = await provider.exportSelectedToNextMonth();
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).clearSnackBars();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      'Successfully exported $exported ${exported == 1 ? 'entry' : 'entries'} to ${nextPeriod.label}',
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    backgroundColor: AppColors.forestGreen,
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    action: SnackBarAction(
-                      label: 'View',
-                      textColor: Colors.white,
-                      onPressed: () {
-                        provider.setSelectedMonthlyDistributionPeriod(nextPeriod);
-                      },
-                    ),
-                  ),
-                );
-              }
-            },
-            icon: const Icon(Icons.arrow_forward_rounded, size: 14),
-            label: const Text(
-              'Export to next month',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.white,
-              foregroundColor: AppColors.forestGreen,
-              elevation: 0,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            ),
-          ),
-          const SizedBox(width: 4),
-          IconButton(
-            onPressed: () => provider.clearMonthlyDistributionSelection(),
-            icon: const Icon(Icons.close_rounded, size: 18, color: Colors.white70),
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
-            tooltip: 'Clear selection',
-          ),
-        ],
+              ),
+            );
+          }
+        },
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.forestGreen,
+          foregroundColor: Colors.white,
+          elevation: 1,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+        child: const Text(
+          'Export to next month',
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+        ),
       ),
     );
   }
