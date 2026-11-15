@@ -14,12 +14,17 @@ void main() {
   });
 
   group('Expense Tracker Taka & SL Column Tests', () {
-    test('At launch data is 0 with 2 blank placeholder rows for SL 1..2', () async {
+    test('At launch data is 0 with 1 blank placeholder row for SL 1', () async {
       final provider = ExpenseProvider();
       await Future.delayed(const Duration(milliseconds: 100));
 
       expect(provider.totalSpent, 0.0);
       expect(provider.totalEntriesCount, 0);
+      expect(provider.tableRows.length, 1);
+      expect(provider.tableRows.every((e) => e.isPlaceholder), isTrue);
+
+      // Tapping '+' inserts an additional empty row
+      await provider.addNewRow();
       expect(provider.tableRows.length, 2);
       expect(provider.tableRows.every((e) => e.isPlaceholder), isTrue);
     });

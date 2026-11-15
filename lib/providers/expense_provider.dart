@@ -32,7 +32,7 @@ class ExpenseProvider extends ChangeNotifier {
   int _activeTabIndex = 0; // 0 = Tracker, 1 = Insights
   DateTime _lastSavedAt = DateTime.now();
   bool _isLoading = true;
-  int _extraEmptyRows = 2;
+  int _extraEmptyRows = 1;
 
   ExpenseProvider() {
     _init();
@@ -104,7 +104,7 @@ class ExpenseProvider extends ChangeNotifier {
 
   void setSelectedMonthlyDistributionPeriod(MonthPeriod period) {
     _selectedMonthlyDistributionPeriod = period;
-    _extraEmptyRows = 2;
+    _extraEmptyRows = 1;
     _selectedMonthlyDistributionIds.clear();
     notifyListeners();
   }
@@ -112,7 +112,7 @@ class ExpenseProvider extends ChangeNotifier {
   void setMonthPeriodFilter(MonthPeriod period) {
     _filterMode = DateFilterMode.monthPeriod;
     _selectedExpenseMonthPeriod = period;
-    _extraEmptyRows = 2;
+    _extraEmptyRows = 1;
     _selectedMonthlyDistributionIds.clear();
     notifyListeners();
   }
@@ -196,7 +196,7 @@ class ExpenseProvider extends ChangeNotifier {
     }
 
     _monthlyBudget = await _repository.loadBudget();
-    _extraEmptyRows = 2;
+    _extraEmptyRows = 1;
     _isLoading = false;
     notifyListeners();
   }
@@ -211,7 +211,7 @@ class ExpenseProvider extends ChangeNotifier {
   void setFilterMode(DateFilterMode mode, {DateTime? customDate}) {
     _filterMode = mode;
     _customSelectedDate = customDate;
-    _extraEmptyRows = 2; // Always reset to 2 empty rows on page change
+    _extraEmptyRows = 1; // Always reset to 1 empty row on page change
     _selectedMonthlyDistributionIds.clear();
     notifyListeners();
   }
@@ -261,7 +261,7 @@ class ExpenseProvider extends ChangeNotifier {
         .toList();
   }
 
-  // Rows displayed in the table: all recorded entries + exactly 2 extra empty rows (plus any added via '+')
+  // Rows displayed in the table: all recorded entries + exactly 1 extra empty row (plus any added via '+')
   List<ExpenseItem> get tableRows {
     final realList = isMonthlyDistributionMode
         ? activeExpenses
@@ -367,7 +367,7 @@ class ExpenseProvider extends ChangeNotifier {
             createdAt: DateTime.now(),
           );
           _monthlyDistributionExpenses.add(newItem);
-          if (_extraEmptyRows > 2) _extraEmptyRows--;
+          if (_extraEmptyRows > 1) _extraEmptyRows--;
           _lastSavedAt = DateTime.now();
           notifyListeners();
           await _repository.saveMonthlyDistributionExpenses(_monthlyDistributionExpenses);
@@ -405,7 +405,7 @@ class ExpenseProvider extends ChangeNotifier {
           createdAt: DateTime.now(),
         );
         _expenses.add(newItem);
-        if (_extraEmptyRows > 2) _extraEmptyRows--;
+        if (_extraEmptyRows > 1) _extraEmptyRows--;
         _lastSavedAt = DateTime.now();
         notifyListeners();
         await _repository.saveExpenses(_expenses);
@@ -640,7 +640,7 @@ class ExpenseProvider extends ChangeNotifier {
   }
 
   Future<void> resetToBlank() async {
-    _extraEmptyRows = 2;
+    _extraEmptyRows = 1;
     _selectedMonthlyDistributionIds.clear();
     if (isMonthlyDistributionMode) {
       final period = selectedMonthlyDistributionPeriod;

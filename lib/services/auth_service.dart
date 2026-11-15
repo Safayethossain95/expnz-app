@@ -8,6 +8,7 @@ class AuthService {
 
   FirebaseAuth get _auth => FirebaseAuth.instance;
   final GoogleSignIn _googleSignIn = GoogleSignIn(
+    serverClientId: '481314825478-22ns82bc3os3rkcsdlhau818eh85n3v3.apps.googleusercontent.com',
     clientId: kIsWeb
         ? '481314825478-22ns82bc3os3rkcsdlhau818eh85n3v3.apps.googleusercontent.com'
         : null,

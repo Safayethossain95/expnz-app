@@ -44,7 +44,7 @@ void main() {
  
 
     // 2. Verify Hero Card in Taka and table rows with 0 entries
-    expect(find.text('৳0'), findsNWidgets(3)); // 1 in hero card + 2 in table rows
+    expect(find.text('৳0'), findsNWidgets(2)); // 1 in hero card + 1 in table row
     expect(find.text('0 entries'), findsOneWidget);
 
     // 3. Verify Table Column Headers: SL, CATEGORY, DESCRIPTION, AMOUNT
@@ -53,13 +53,15 @@ void main() {
     expect(find.text('DESCRIPTION'), findsOneWidget);
     expect(find.text('AMOUNT'), findsOneWidget);
 
-    // 4. Verify 2 rows initially visible with SL 1..2
+    // 4. Verify 1 row initially visible with SL 1
     expect(find.text('1'), findsOneWidget);
-    expect(find.text('2'), findsOneWidget);
 
     // 5. Tap '+' button to add new row
     await tester.tap(find.byIcon(Icons.add_rounded));
     await tester.pumpAndSettle();
+
+    // Now row 2 is inserted
+    expect(find.text('2'), findsOneWidget);
 
     // 6. Switch to Tools tab
     await tester.tap(find.text('Tools').last);

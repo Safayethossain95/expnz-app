@@ -20,7 +20,7 @@ class AuthGate extends StatefulWidget {
 class _AuthGateState extends State<AuthGate> {
   final AuthService _authService = AuthService();
   final PinLockService _pinService = PinLockService();
-  bool _guestMode = false;
+  bool _guestMode = true;
   String? _lastLoadedUid;
   String? _pinCheckedUid;
   bool _isPinUnlocked = false;
@@ -147,7 +147,7 @@ class _AuthGateState extends State<AuthGate> {
                 _isPinUnlocked = false;
                 _pinCheckedUid = null;
                 _lastLoadedUid = null;
-                _guestMode = false;
+                _guestMode = true;
               });
             },
           );
