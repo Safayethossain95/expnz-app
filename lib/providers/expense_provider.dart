@@ -181,14 +181,36 @@ class ExpenseProvider extends ChangeNotifier {
     await _monthStartService.load();
 
     final loadedExpenses = await _repository.loadExpenses();
+    bool needsSaveExpenses = false;
     _expenses = loadedExpenses
         .where((e) => !e.isPlaceholder && (e.amount > 0 || e.description.isNotEmpty || e.category != null))
+        .map((e) {
+          if (e.id.startsWith('placeholder_')) {
+            needsSaveExpenses = true;
+            return e.copyWith(id: _repository.createNewBlankItem().id);
+          }
+          return e;
+        })
         .toList();
+    if (needsSaveExpenses) {
+      await _repository.saveExpenses(_expenses);
+    }
 
     final loadedMonthly = await _repository.loadMonthlyDistributionExpenses();
+    bool needsSaveMonthly = false;
     _monthlyDistributionExpenses = loadedMonthly
         .where((e) => !e.isPlaceholder && (e.amount > 0 || e.description.isNotEmpty || e.category != null))
+        .map((e) {
+          if (e.id.startsWith('placeholder_')) {
+            needsSaveMonthly = true;
+            return e.copyWith(id: _repository.createNewBlankItem().id);
+          }
+          return e;
+        })
         .toList();
+    if (needsSaveMonthly) {
+      await _repository.saveMonthlyDistributionExpenses(_monthlyDistributionExpenses);
+    }
 
     // Check and automatically move 15 Sep - 15 Oct items to 15 Oct - 15 Nov if needed
     if (hasSepOctMonthlyDistributionItems) {
@@ -353,12 +375,13 @@ class ExpenseProvider extends ChangeNotifier {
     String? description,
     double? amount,
   }) async {
+    final isPlaceholder = id.startsWith('placeholder_');
+
     if (isMonthlyDistributionMode) {
-      final index = _monthlyDistributionExpenses.indexWhere((e) => e.id == id);
-      if (index == -1) {
+      if (isPlaceholder) {
         if ((amount ?? 0) > 0 || (description ?? '').isNotEmpty || category != null) {
           final newItem = ExpenseItem(
-            id: id,
+            id: _repository.createNewBlankItem().id,
             date: date ?? currentEffectiveDate,
             category: category,
             description: description ?? '',
@@ -374,6 +397,9 @@ class ExpenseProvider extends ChangeNotifier {
         }
         return;
       }
+
+      final index = _monthlyDistributionExpenses.indexWhere((e) => e.id == id);
+      if (index == -1) return;
 
       final current = _monthlyDistributionExpenses[index];
       final updated = current.copyWith(
@@ -392,11 +418,10 @@ class ExpenseProvider extends ChangeNotifier {
       return;
     }
 
-    final index = _expenses.indexWhere((e) => e.id == id);
-    if (index == -1) {
+    if (isPlaceholder) {
       if ((amount ?? 0) > 0 || (description ?? '').isNotEmpty || category != null) {
         final newItem = ExpenseItem(
-          id: id,
+          id: _repository.createNewBlankItem().id,
           date: date ?? currentEffectiveDate,
           category: category,
           description: description ?? '',
@@ -412,6 +437,9 @@ class ExpenseProvider extends ChangeNotifier {
       }
       return;
     }
+
+    final index = _expenses.indexWhere((e) => e.id == id);
+    if (index == -1) return;
 
     final current = _expenses[index];
     final updated = current.copyWith(

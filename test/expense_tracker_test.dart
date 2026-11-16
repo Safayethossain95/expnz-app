@@ -60,6 +60,44 @@ void main() {
       expect(provider.totalEntriesCount, 1);
     });
 
+    test('Entering data into placeholder row appends new item and never overwrites existing items', () async {
+      final provider = ExpenseProvider();
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      // Enter data into the first placeholder
+      final placeholder1Id = provider.tableRows.last.id;
+      await provider.updateCell(
+        id: placeholder1Id,
+        category: ExpenseCategory.shopping,
+        description: 'pati',
+        amount: 420.0,
+      );
+
+      expect(provider.totalEntriesCount, 1);
+      expect(provider.activeExpenses.first.description, 'pati');
+      expect(provider.activeExpenses.first.category, ExpenseCategory.shopping);
+      expect(provider.activeExpenses.first.amount, 420.0);
+
+      // Now enter data into the newly appeared placeholder row
+      final placeholder2Id = provider.tableRows.last.id;
+      await provider.updateCell(
+        id: placeholder2Id,
+        category: ExpenseCategory.travel,
+        description: 'new market fare',
+        amount: 200.0,
+      );
+
+      // Verify second item was appended, NOT overwriting the first item
+      expect(provider.totalEntriesCount, 2);
+      expect(provider.activeExpenses[0].description, 'pati');
+      expect(provider.activeExpenses[0].category, ExpenseCategory.shopping);
+      expect(provider.activeExpenses[0].amount, 420.0);
+      expect(provider.activeExpenses[1].description, 'new market fare');
+      expect(provider.activeExpenses[1].category, ExpenseCategory.travel);
+      expect(provider.activeExpenses[1].amount, 200.0);
+      expect(provider.totalSpent, 620.0);
+    });
+
     test('Date filtering filters items accurately', () async {
       final provider = ExpenseProvider();
       await Future.delayed(const Duration(milliseconds: 100));
@@ -221,7 +259,7 @@ void main() {
 
       // Now clear category
       await provider.updateCell(
-        id: firstRowId,
+        id: provider.tableRows.first.id,
         clearCategory: true,
       );
       expect(provider.tableRows.first.category, isNull);
